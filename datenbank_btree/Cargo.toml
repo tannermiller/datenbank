@@ -1,7 +1,8 @@
 [package]
-name = "datenbank_kv"
+name = "datenbank_btree"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+datenbank_kv = { path = "../datenbank_kv" }
 thiserror = "1.0"

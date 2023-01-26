@@ -9,6 +9,7 @@ pub enum Error {
 pub trait KeyValueStore {
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error>;
     fn put(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Error>;
+    fn delete(&mut self, key: &[u8]) -> Result<(), Error>;
 }
 
 pub struct Memory {
@@ -36,6 +37,11 @@ impl KeyValueStore for Memory {
 
     fn put(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Error> {
         self.store.insert(key, value);
+        Ok(())
+    }
+
+    fn delete(&mut self, key: &[u8]) -> Result<(), Error> {
+        self.store.remove(key);
         Ok(())
     }
 }

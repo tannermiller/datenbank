@@ -2,4 +2,5 @@
 
 members = [
     "datenbank_kv",
+    "datenbank_btree",
 ]

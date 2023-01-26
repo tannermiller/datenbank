@@ -3,6 +3,14 @@
 version = 3
 
 [[package]]
+name = "datenbank_btree"
+version = "0.1.0"
+dependencies = [
+ "datenbank_kv",
+ "thiserror",
+]
+
+[[package]]
 name = "datenbank_kv"
 version = "0.1.0"
 dependencies = [
