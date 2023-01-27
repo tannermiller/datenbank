@@ -1,11 +1,16 @@
 use datenbank_kv::{Error as KvError, KeyValueStore};
+pub use schema::Schema;
 
-#[derive(Debug, thiserror::Error)]
+mod schema;
+
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
     #[error("io error attempting operation")]
     Io(#[from] KvError),
     #[error("attempted to insert duplicate entry with key {0}")]
     DuplicateEntry(String),
+    #[error("column names must be unique, found duplicate {0}")]
+    NonUniqueColumn(String),
 }
 
 // BTRee is a B+ tree that stores the data in a key value store.
@@ -23,6 +28,8 @@ pub struct BTree<S: KeyValueStore> {
 impl<S: KeyValueStore> BTree<S> {
     // Build a brand new btree with no data in it.
     pub fn new(id: String, order: usize, schema: Schema, store: S) -> BTree<S> {
+        // TODO: Should this write something to the store? I don't know what, there's no root yet.
+        // But we probably need a top-level metadata struct (which is BTree itself, probably).
         BTree {
             id: id.clone(),
             order,
@@ -34,7 +41,7 @@ impl<S: KeyValueStore> BTree<S> {
     }
 
     // Load a btree that has already persisted data.
-    pub fn load(id: &str, store: S) -> BTree<S> {
+    pub fn load(id: &str, store: S) -> Result<BTree<S>, Error> {
         // TODO: Load the root info from the store and hydrate the tree
         todo!()
     }
@@ -94,7 +101,24 @@ enum NodeBody {
 }
 
 // This holds a single row's worth of data.
-pub struct Row;
+pub struct Row {
+    schema: Schema,
+    data: Vec<u8>,
+}
 
-// The schema describes the columns that make each row in the table.
-pub struct Schema;
+impl Row {
+    fn new(schema: Schema, cols: Vec<Column>) -> Self {
+        // TODO: Validate columns match schema
+        // pack column data into single Vec<u8>
+        todo!()
+    }
+}
+
+pub enum Column {
+    // VarChar is variable length string with max length of 65,535.
+    VarChar(String),
+    // Int is a signed integer with max value of 2,147,483,647.
+    Int(i32),
+    // Bool is a boolean value.
+    Bool(bool),
+}

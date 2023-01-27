@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
     #[error("io error attempting operation: {0}")]
     Io(String),
