@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::{Column, Error};
 
 // The schema describes the columns that make each row in the table.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Schema {
     // each column has a name a data type
     columns: Vec<(String, ColumnType)>,
@@ -78,7 +78,7 @@ impl Schema {
         }
     }
 
-    fn validate_columns(&self, cols: &[Column]) -> bool {
+    pub fn validate_columns(&self, cols: &[Column]) -> bool {
         if self.columns.len() != cols.len() {
             return false;
         }
@@ -103,7 +103,7 @@ impl Schema {
 }
 
 // A data type for a single column.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ColumnType {
     // VarChar is variable length string with max length of 65,535.
     VarChar(u16),

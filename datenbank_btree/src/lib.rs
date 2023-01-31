@@ -1,6 +1,8 @@
 use datenbank_kv::{Error as KvError, KeyValueStore};
-pub use schema::Schema;
+pub use row::{Column, Row};
+pub use schema::{ColumnType, Schema};
 
+mod row;
 mod schema;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -98,27 +100,4 @@ enum NodeBody {
         // the leaf node to the right of this one, used for table scans
         right_sibling: Option<String>,
     },
-}
-
-// This holds a single row's worth of data.
-pub struct Row {
-    schema: Schema,
-    data: Vec<u8>,
-}
-
-impl Row {
-    fn new(schema: Schema, cols: Vec<Column>) -> Self {
-        // TODO: Validate columns match schema
-        // pack column data into single Vec<u8>
-        todo!()
-    }
-}
-
-pub enum Column {
-    // VarChar is variable length string with max length of 65,535.
-    VarChar(String),
-    // Int is a signed integer with max value of 2,147,483,647.
-    Int(i32),
-    // Bool is a boolean value.
-    Bool(bool),
 }
