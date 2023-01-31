@@ -1,6 +1,6 @@
 [workspace]
 
 members = [
-    "datenbank_kv",
+    "datenbank_pagestore",
     "datenbank_btree",
 ]

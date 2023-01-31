@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-datenbank_kv = { path = "../datenbank_kv" }
+datenbank_pagestore = { path = "../datenbank_pagestore" }
 thiserror = "1.0"

@@ -21,7 +21,7 @@ impl Schema {
         Ok(Schema { columns })
     }
 
-    fn validate_packed(&self, packed_row: &[u8]) -> bool {
+    pub fn validate_packed(&self, packed_row: &[u8]) -> bool {
         let mut i = 0;
         for (_, col) in self.columns.iter() {
             let consumed_len = match col {

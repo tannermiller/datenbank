@@ -1,4 +1,4 @@
-use datenbank_kv::{Error as KvError, KeyValueStore};
+use datenbank_pagestore::{Error as PageError, TablePageStore};
 pub use row::{Column, Row};
 pub use schema::{ColumnType, Schema};
 
@@ -8,7 +8,7 @@ mod schema;
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
     #[error("io error attempting operation")]
-    Io(#[from] KvError),
+    Io(#[from] PageError),
     #[error("attempted to insert duplicate entry with key {0}")]
     DuplicateEntry(String),
     #[error("column names must be unique, found duplicate {0}")]
@@ -16,7 +16,7 @@ pub enum Error {
 }
 
 // BTRee is a B+ tree that stores the data in a key value store.
-pub struct BTree<S: KeyValueStore> {
+pub struct BTree<S: TablePageStore> {
     // the name of this tree, often its the table or index name
     id: String,
     schema: Schema,
@@ -27,7 +27,7 @@ pub struct BTree<S: KeyValueStore> {
     store: S,
 }
 
-impl<S: KeyValueStore> BTree<S> {
+impl<S: TablePageStore> BTree<S> {
     // Build a brand new btree with no data in it.
     pub fn new(id: String, order: usize, schema: Schema, store: S) -> BTree<S> {
         // TODO: Should this write something to the store? I don't know what, there's no root yet.
