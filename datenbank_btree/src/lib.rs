@@ -15,6 +15,10 @@ pub enum Error {
     NonUniqueColumn(String),
 }
 
+// TODO: The btree needs to know the page size so it can manage and size its nodes appropriately.
+// TODO: Probably need to implement this a bit more to understand what that at-rest format looks
+// like before I can determine what how exactly that works.
+
 // BTRee is a B+ tree that stores the data in a key value store.
 pub struct BTree<S: TablePageStore> {
     // the name of this tree, often its the table or index name
@@ -29,9 +33,13 @@ pub struct BTree<S: TablePageStore> {
 
 impl<S: TablePageStore> BTree<S> {
     // Build a brand new btree with no data in it.
-    pub fn new(id: String, order: usize, schema: Schema, store: S) -> BTree<S> {
+    pub fn new(id: String, schema: Schema, store: S) -> BTree<S> {
         // TODO: Should this write something to the store? I don't know what, there's no root yet.
         // But we probably need a top-level metadata struct (which is BTree itself, probably).
+        // Yes, this will write to the store, a header in the 0th page. What is in that header and
+        // how its serialized is TBD.
+        let order = store.usable_page_size() / 1000; // TODO: this magic number should be figured
+                                                     // out and pased on how big each node will be.
         BTree {
             id: id.clone(),
             order,
