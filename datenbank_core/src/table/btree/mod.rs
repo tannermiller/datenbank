@@ -1,4 +1,4 @@
-use datenbank_pagestore::{Error as PageError, TablePageStore};
+use crate::pagestore::{Error as PageError, TablePageStore};
 pub use row::{Column, Row};
 pub use schema::{ColumnType, Schema};
 

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::{Column, Error};
+use super::{Column, Error};
 
 // The schema describes the columns that make each row in the table.
 #[derive(Clone, Debug, PartialEq)]

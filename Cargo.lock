@@ -3,15 +3,7 @@
 version = 3
 
 [[package]]
-name = "datenbank_btree"
-version = "0.1.0"
-dependencies = [
- "datenbank_pagestore",
- "thiserror",
-]
-
-[[package]]
-name = "datenbank_pagestore"
+name = "datenbank_core"
 version = "0.1.0"
 dependencies = [
  "thiserror",

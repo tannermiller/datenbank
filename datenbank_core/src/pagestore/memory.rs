@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-use crate::{Error, TablePageStore};
+use super::{Error, TablePageStore};
 
 pub struct Memory {
     page_size: usize,

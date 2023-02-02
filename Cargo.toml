@@ -1,6 +1,5 @@
 [workspace]
 
 members = [
-    "datenbank_pagestore",
-    "datenbank_btree",
+    "datenbank_core",
 ]

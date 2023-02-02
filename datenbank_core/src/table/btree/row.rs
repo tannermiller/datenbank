@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use crate::Schema;
+use super::Schema;
 
 // This holds a single row's worth of data.
 #[derive(Clone, Debug, PartialEq)]
@@ -84,7 +84,7 @@ fn pack_row_data(cols: Vec<Column>) -> Vec<u8> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::schema::ColumnType;
+    use crate::table::btree::schema::ColumnType;
 
     #[test]
     fn test_size_of_packed_rows() {
