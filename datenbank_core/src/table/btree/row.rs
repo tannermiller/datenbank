@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use super::Schema;
+use crate::schema::{size_of_packed_cols, Column, Schema};
 
 // This holds a single row's worth of data.
 #[derive(Clone, Debug, PartialEq)]
@@ -29,28 +29,8 @@ impl Row {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Column {
-    // VarChar is variable length string with max length of 65,535.
-    VarChar(String),
-    // Int is a signed integer with max value of 2,147,483,647.
-    Int(i32),
-    // Bool is a boolean value.
-    Bool(bool),
-}
-
-// Find the total allocated size of bytes we need to fit these columns.
-fn size_of_packed_row(cols: &[Column]) -> usize {
-    cols.iter().fold(0, |acc, col| match col {
-        // size of len (2 bytes) + size of data itself
-        Column::VarChar(s) => acc + 2 + s.as_bytes().len(),
-        Column::Int(_) => acc + 4,
-        Column::Bool(_) => acc + 1,
-    })
-}
-
 fn pack_row_data(cols: Vec<Column>) -> Vec<u8> {
-    let size = size_of_packed_row(&cols);
+    let size = size_of_packed_cols(&cols);
 
     let mut row_data = Vec::with_capacity(size);
 
@@ -84,17 +64,7 @@ fn pack_row_data(cols: Vec<Column>) -> Vec<u8> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::table::btree::schema::ColumnType;
-
-    #[test]
-    fn test_size_of_packed_rows() {
-        let cols = vec![
-            Column::VarChar("012345678901234567890123456789".to_string()),
-            Column::Int(7),
-            Column::Bool(true),
-        ];
-        assert_eq!(37, size_of_packed_row(&cols));
-    }
+    use crate::schema::ColumnType;
 
     #[test]
     fn test_pack_row_data() {

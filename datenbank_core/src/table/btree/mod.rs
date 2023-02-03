@@ -1,9 +1,8 @@
 use crate::pagestore::{Error as PageError, TablePageStore};
-pub use row::{Column, Row};
-pub use schema::{ColumnType, Schema};
+pub use crate::schema::{Column, ColumnType, Schema};
+pub use row::Row;
 
 mod row;
-mod schema;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -11,8 +10,6 @@ pub enum Error {
     Io(#[from] PageError),
     #[error("attempted to insert duplicate entry with key {0}")]
     DuplicateEntry(String),
-    #[error("column names must be unique, found duplicate {0}")]
-    NonUniqueColumn(String),
 }
 
 // TODO: The btree needs to know the page size so it can manage and size its nodes appropriately.

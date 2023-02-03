@@ -1,6 +1,10 @@
 use std::collections::HashSet;
 
-use super::{Column, Error};
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum Error {
+    #[error("column names must be unique, found duplicate {0}")]
+    NonUniqueColumn(String),
+}
 
 // The schema describes the columns that make each row in the table.
 #[derive(Clone, Debug, PartialEq)]
@@ -100,6 +104,27 @@ impl Schema {
 
         true
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Column {
+    // VarChar is variable length string with max length of 65,535.
+    VarChar(String),
+    // Int is a signed integer with max value of 2,147,483,647.
+    Int(i32),
+    // Bool is a boolean value.
+    Bool(bool),
+}
+
+// TODO: This doesn't take off-page storage into account
+// Find the total allocated size of bytes we need to fit these columns.
+pub fn size_of_packed_cols(cols: &[Column]) -> usize {
+    cols.iter().fold(0, |acc, col| match col {
+        // size of len (2 bytes) + size of data itself
+        Column::VarChar(s) => acc + 2 + s.as_bytes().len(),
+        Column::Int(_) => acc + 4,
+        Column::Bool(_) => acc + 1,
+    })
 }
 
 // A data type for a single column.
@@ -222,5 +247,15 @@ mod test {
             &vec![0, 0, 0, 1, 1, 0, 5, 104, 111, 119, 100],
             false,
         );
+    }
+
+    #[test]
+    fn test_size_of_packed_cols() {
+        let cols = vec![
+            Column::VarChar("012345678901234567890123456789".to_string()),
+            Column::Int(7),
+            Column::Bool(true),
+        ];
+        assert_eq!(37, size_of_packed_cols(&cols));
     }
 }
