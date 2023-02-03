@@ -17,7 +17,7 @@ pub enum Error {
 // associated with this store and can not be changed after it has been established. Each
 // implementation of this should automatically allocate the 0-indexed page at initial creation
 // time. That 0th page will be used for table header information and not for table content.
-pub trait TablePageStore {
+pub trait TablePageStore: Clone {
     // Allocate and prepare a new page in persistence, returning the page id.
     fn allocate(&mut self) -> Result<usize, Error>;
 

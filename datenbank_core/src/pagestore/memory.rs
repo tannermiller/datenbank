@@ -1,26 +1,24 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
 
 use super::{Error, TablePageStore};
 
+#[derive(Clone)]
 pub struct Memory {
+    inner: Rc<RefCell<Inner>>,
+}
+
+// use an inner struct with all the functionality so we can support Clone on the TablePageStore
+// implementation.
+struct Inner {
     page_size: usize,
     last_page: usize,
     store: HashMap<usize, Vec<u8>>,
     free_list: VecDeque<usize>,
 }
 
-impl Memory {
-    pub fn new(page_size: usize) -> Self {
-        Memory {
-            page_size,
-            last_page: 0,
-            store: HashMap::new(),
-            free_list: VecDeque::new(),
-        }
-    }
-}
-
-impl TablePageStore for Memory {
+impl Inner {
     fn allocate(&mut self) -> Result<usize, Error> {
         match self.free_list.pop_front() {
             Some(free_id) => Ok(free_id),
@@ -71,6 +69,41 @@ impl TablePageStore for Memory {
         self.free_list.push_back(page_id);
 
         Ok(())
+    }
+}
+
+impl Memory {
+    pub fn new(page_size: usize) -> Self {
+        Memory {
+            inner: Rc::new(RefCell::new(Inner {
+                page_size,
+                last_page: 0,
+                store: HashMap::new(),
+                free_list: VecDeque::new(),
+            })),
+        }
+    }
+}
+
+impl TablePageStore for Memory {
+    fn allocate(&mut self) -> Result<usize, Error> {
+        self.inner.borrow_mut().allocate()
+    }
+
+    fn usable_page_size(&self) -> usize {
+        self.inner.borrow().usable_page_size()
+    }
+
+    fn get(&self, page_id: usize) -> Result<Vec<u8>, Error> {
+        self.inner.borrow().get(page_id)
+    }
+
+    fn put(&mut self, page_id: usize, payload: Vec<u8>) -> Result<(), Error> {
+        self.inner.borrow_mut().put(page_id, payload)
+    }
+
+    fn delete(&mut self, page_id: usize) -> Result<(), Error> {
+        self.inner.borrow_mut().delete(page_id)
     }
 }
 
