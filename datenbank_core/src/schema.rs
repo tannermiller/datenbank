@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::io::Write;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -75,11 +76,7 @@ impl Schema {
 
         // We've reached the end of our expected columns but if there is more in the packed row we
         // haven't consumed yet, then that's an issue.
-        if i != packed_row.len() {
-            false
-        } else {
-            true
-        }
+        i == packed_row.len()
     }
 
     pub fn validate_columns(&self, cols: &[Column]) -> bool {
@@ -87,7 +84,7 @@ impl Schema {
             return false;
         }
 
-        for ((_, schema_col), col) in self.columns.iter().zip(cols.into_iter()) {
+        for ((_, schema_col), col) in self.columns.iter().zip(cols.iter()) {
             let is_valid = match (schema_col, col) {
                 (ColumnType::VarChar(schema_len), Column::VarChar(col_value)) => {
                     col_value.len() <= *schema_len as usize
@@ -103,6 +100,51 @@ impl Schema {
         }
 
         true
+    }
+
+    pub fn len(&self) -> usize {
+        self.columns.len()
+    }
+
+    // The encoded Schema has the following format:
+    //   - 2 bytes which store the number of schema items
+    //   - each item is then encoded as:
+    //     - each item begins with 1 byte which indicates the type of the column
+    //     - 2 bytes for the length of the name of the column
+    //     - the bytes for the name of the column
+    //     - for statically sized columns (e.g. Int, Bool), nothing else is encoded
+    //     - for variable length columns (e.g. VarChar), the max len is encoded in however many
+    //       bytes it requires
+    pub fn encode(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(2 + self.len());
+        bytes
+            .write_all(&(self.len() as u16).to_be_bytes())
+            .expect("can't fail writing to vec");
+
+        for column in &self.columns {
+            encode_column_type(column, &mut bytes);
+        }
+
+        bytes
+    }
+}
+
+// See Schema::encode for description of the format
+fn encode_column_type((name, column): &(String, ColumnType), bytes: &mut Vec<u8>) {
+    bytes
+        .write_all(&column.encoded_id().to_be_bytes())
+        .expect("can't fail writing to vec");
+    bytes
+        .write_all(&(name.as_bytes().len() as u16).to_be_bytes())
+        .expect("can't fail writing to vec");
+    bytes
+        .write_all(name.as_bytes())
+        .expect("can't fail writing to vec");
+
+    if let ColumnType::VarChar(max_size) = column {
+        bytes
+            .write_all(&max_size.to_be_bytes())
+            .expect("can't fail writing to vec");
     }
 }
 
@@ -136,6 +178,16 @@ pub enum ColumnType {
     Int,
     // Bool is a boolean value.
     Bool,
+}
+
+impl ColumnType {
+    fn encoded_id(&self) -> u8 {
+        match self {
+            ColumnType::VarChar(_) => 0,
+            ColumnType::Int => 1,
+            ColumnType::Bool => 2,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -257,5 +309,23 @@ mod test {
             Column::Bool(true),
         ];
         assert_eq!(37, size_of_packed_cols(&cols));
+    }
+
+    #[test]
+    fn test_encode() {
+        let schema = Schema::new(vec![
+            ("wonder".into(), ColumnType::Int),
+            ("whats".into(), ColumnType::Bool),
+            ("next".into(), ColumnType::VarChar(10)),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            vec![
+                0, 3, 1, 0, 6, 119, 111, 110, 100, 101, 114, 2, 0, 5, 119, 104, 97, 116, 115, 0, 0,
+                4, 110, 101, 120, 116, 0, 10
+            ],
+            schema.encode()
+        );
     }
 }
