@@ -1,6 +1,6 @@
 mod memory;
 
-pub use memory::Memory;
+pub use memory::{Memory, MemoryBuilder};
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -36,4 +36,13 @@ pub trait TablePageStore: Clone {
 
     // Delete the contents of the page and free it for reuse/deallocation.
     fn delete(&mut self, page_id: usize) -> Result<(), Error>;
+}
+
+// TablePageStoreBuilder is responsible for constructing TablePageStores for a given table.
+pub trait TablePageStoreBuilder {
+    type TablePageStore: TablePageStore;
+
+    // Build may either create an entirely new instance of a TablePageStore, or return a clone of
+    // an already built one.
+    fn build(&mut self, table_name: &str, page_size: usize) -> Result<Self::TablePageStore, Error>;
 }

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
-use super::{Error, TablePageStore};
+use super::{Error, TablePageStore, TablePageStoreBuilder};
 
 #[derive(Clone)]
 pub struct Memory {
@@ -104,6 +104,39 @@ impl TablePageStore for Memory {
 
     fn delete(&mut self, page_id: usize) -> Result<(), Error> {
         self.inner.borrow_mut().delete(page_id)
+    }
+}
+
+pub struct MemoryBuilder {
+    tables: HashMap<String, Memory>,
+}
+
+impl MemoryBuilder {
+    pub fn new() -> Self {
+        MemoryBuilder {
+            tables: HashMap::new(),
+        }
+    }
+}
+
+impl TablePageStoreBuilder for MemoryBuilder {
+    type TablePageStore = Memory;
+
+    fn build(&mut self, table_name: &str, page_size: usize) -> Result<Self::TablePageStore, Error> {
+        if let Some(page_store) = self.tables.get(table_name) {
+            return Ok(page_store.clone());
+        }
+
+        let page_store = Memory::new(page_size);
+        let ret_page_store = page_store.clone();
+        self.tables.insert(table_name.to_string(), page_store);
+        Ok(ret_page_store)
+    }
+}
+
+impl Default for MemoryBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
