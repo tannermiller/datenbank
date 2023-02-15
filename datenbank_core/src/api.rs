@@ -1,13 +1,15 @@
 use crate::exec::{execute, Error as ExecError};
 use crate::pagestore::{MemoryBuilder, TablePageStoreBuilder};
-use crate::parser::parse;
+use crate::parser::{parse, Error as ParseError};
 
 pub use crate::exec::ExecResult;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
-    #[error("error executing query")]
+    #[error("error executing input")]
     Exec(#[from] ExecError),
+    #[error("error parsing input")]
+    Parse(#[from] ParseError),
 }
 
 pub struct Database<B: TablePageStoreBuilder> {
@@ -26,7 +28,7 @@ impl Database<MemoryBuilder> {
 impl<B: TablePageStoreBuilder> Database<B> {
     // Execute the provided SQL string against the database.
     pub fn exec(input: &str) -> Result<ExecResult, Error> {
-        let input = parse(input);
+        let input = parse(input)?;
         execute(input).map_err(Into::into)
     }
 }
