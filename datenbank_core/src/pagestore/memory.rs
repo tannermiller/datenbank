@@ -108,13 +108,15 @@ impl TablePageStore for Memory {
 }
 
 pub struct MemoryBuilder {
+    page_size: usize,
     tables: HashMap<String, Memory>,
 }
 
 impl MemoryBuilder {
-    pub fn new() -> Self {
+    pub fn new(page_size: usize) -> Self {
         MemoryBuilder {
             tables: HashMap::new(),
+            page_size,
         }
     }
 }
@@ -122,21 +124,15 @@ impl MemoryBuilder {
 impl TablePageStoreBuilder for MemoryBuilder {
     type TablePageStore = Memory;
 
-    fn build(&mut self, table_name: &str, page_size: usize) -> Result<Self::TablePageStore, Error> {
+    fn build(&mut self, table_name: &str) -> Result<Self::TablePageStore, Error> {
         if let Some(page_store) = self.tables.get(table_name) {
             return Ok(page_store.clone());
         }
 
-        let page_store = Memory::new(page_size);
+        let page_store = Memory::new(self.page_size);
         let ret_page_store = page_store.clone();
         self.tables.insert(table_name.to_string(), page_store);
         Ok(ret_page_store)
-    }
-}
-
-impl Default for MemoryBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

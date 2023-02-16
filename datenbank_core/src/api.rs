@@ -4,6 +4,10 @@ use crate::parser::{parse, Error as ParseError};
 
 pub use crate::exec::ExecResult;
 
+// 16k page sizes for now
+// TODO: How should this be made configurable?
+const PAGE_SIZE: usize = 16 * 1024;
+
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
     #[error("error executing input")]
@@ -20,15 +24,15 @@ impl Database<MemoryBuilder> {
     // Build a database built upon only in-memory storage for the tables.
     pub fn memory() -> Database<MemoryBuilder> {
         Database {
-            builder: MemoryBuilder::new(),
+            builder: MemoryBuilder::new(PAGE_SIZE),
         }
     }
 }
 
 impl<B: TablePageStoreBuilder> Database<B> {
     // Execute the provided SQL string against the database.
-    pub fn exec(input: &str) -> Result<ExecResult, Error> {
+    pub fn exec(&mut self, input: &str) -> Result<ExecResult, Error> {
         let input = parse(input)?;
-        execute(input).map_err(Into::into)
+        execute(&mut self.builder, input).map_err(Into::into)
     }
 }

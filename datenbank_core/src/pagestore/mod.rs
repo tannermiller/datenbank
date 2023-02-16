@@ -44,5 +44,5 @@ pub trait TablePageStoreBuilder {
 
     // Build may either create an entirely new instance of a TablePageStore, or return a clone of
     // an already built one.
-    fn build(&mut self, table_name: &str, page_size: usize) -> Result<Self::TablePageStore, Error>;
+    fn build(&mut self, table_name: &str) -> Result<Self::TablePageStore, Error>;
 }

@@ -37,8 +37,8 @@ pub enum ColumnType {
 
 #[derive(Debug, PartialEq)]
 pub struct ColumnSchema<'a> {
-    column_name: &'a str,
-    column_type: ColumnType,
+    pub column_name: &'a str,
+    pub column_type: ColumnType,
 }
 
 impl<'a> ColumnSchema<'a> {

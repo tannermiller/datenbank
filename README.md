@@ -10,9 +10,13 @@ This is a toy database that I'm building just to learn more about how databases 
     2) INSERT INTO
     3) SELECT FROM
 3) File persistence
-4) Joins
-5) Write Ahead Log
-6) Table Indices
-7) Concurrency Support
+4) Primary Keys (other than treating the whole row as the primary)
+5) Joins
+6) Write Ahead Log
+7) Table Indices
+8) Concurrency Support
     1) Transactions
     2) Row & Table Locks
+9) Server
+10) Client library
+11) CLI using client lib
