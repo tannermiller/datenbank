@@ -54,20 +54,13 @@ fn column_schema(input: &str) -> IResult<&str, ColumnSchema> {
 
 #[cfg(test)]
 mod test {
+    use super::super::parse_check;
     use super::*;
 
     #[test]
     fn test_create_table_header() {
         fn check(input: &str, expected: Option<&str>) {
-            match (create_table_header(input), expected) {
-                (Ok((rest, result)), Some(exp)) => {
-                    assert!(rest.is_empty());
-                    assert_eq!(result, exp);
-                }
-                (Err(_), None) => (),
-                (Ok(_), None) => panic!("shouldn't have passed"),
-                (Err(err), Some(_)) => panic!("should't have errored: {}", err),
-            }
+            parse_check(create_table_header, input, expected)
         }
 
         check("CREATE TABLE foo {\n", Some("foo"));
@@ -82,42 +75,9 @@ mod test {
     }
 
     #[test]
-    fn test_identifier() {
-        fn check(input: &str, expected: Option<&str>) {
-            match (identifier(input), expected) {
-                (Ok((rest, result)), Some(exp)) => {
-                    assert!(rest.is_empty());
-                    assert_eq!(result, exp);
-                }
-                (Err(_), None) => (),
-                (Ok(_), None) => panic!("shouldn't have passed"),
-                (Err(err), Some(_)) => panic!("should't have errored: {}", err),
-            }
-        }
-
-        check("1foo", None);
-        check("Foo", Some("Foo"));
-        check("Foo1", Some("Foo1"));
-        check("foo_bar", Some("foo_bar"));
-        check("Foo_Bar", Some("Foo_Bar"));
-        check("Foo_1", Some("Foo_1"));
-        check("foo_bar_baz", Some("foo_bar_baz"));
-        check("foo_2_baz", Some("foo_2_baz"));
-        check("_must_not_start", None);
-    }
-
-    #[test]
     fn test_column_type() {
         fn check(input: &str, expected: Option<ColumnType>) {
-            match (column_type(input), expected) {
-                (Ok((rest, result)), Some(exp)) => {
-                    assert!(rest.is_empty());
-                    assert_eq!(result, exp);
-                }
-                (Err(_), None) => (),
-                (Ok(_), None) => panic!("shouldn't have passed"),
-                (Err(err), Some(_)) => panic!("should't have errored: {}", err),
-            }
+            parse_check(column_type, input, expected)
         }
 
         check("nope", None);
@@ -137,15 +97,7 @@ mod test {
     #[test]
     fn test_column_schema() {
         fn check(input: &str, expected: Option<ColumnSchema>) {
-            match (column_schema(input), expected) {
-                (Ok((rest, result)), Some(exp)) => {
-                    assert!(rest.is_empty());
-                    assert_eq!(result, exp);
-                }
-                (Err(_), None) => (),
-                (Ok(_), None) => panic!("shouldn't have passed"),
-                (Err(err), Some(_)) => panic!("should't have errored: {}", err),
-            }
+            parse_check(column_schema, input, expected)
         }
 
         check("nope", None);
@@ -172,15 +124,7 @@ mod test {
     #[test]
     fn test_create_table() {
         fn check(input: &str, expected: Option<Input>) {
-            match (create_table(input), expected) {
-                (Ok((rest, result)), Some(exp)) => {
-                    assert!(rest.is_empty());
-                    assert_eq!(result, exp);
-                }
-                (Err(_), None) => (),
-                (Ok(_), None) => panic!("shouldn't have passed"),
-                (Err(err), Some(_)) => panic!("should't have errored: {}", err),
-            }
+            parse_check(create_table, input, expected)
         }
 
         check("nope", None);

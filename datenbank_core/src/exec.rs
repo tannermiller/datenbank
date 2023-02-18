@@ -23,6 +23,11 @@ pub fn execute<B: TablePageStoreBuilder>(
 ) -> Result<ExecResult, Error> {
     match input {
         Input::Create { table_name, schema } => create_table(store_builder, table_name, schema),
+        Input::InsertInto {
+            table_name,
+            columns,
+            values,
+        } => insert_into(store_builder, table_name, columns, values),
     }
 }
 
@@ -51,4 +56,13 @@ fn parser_schema_to_table_schema(parser_schema: Vec<ColumnSchema>) -> Result<Sch
         .collect();
 
     Schema::new(columns).map_err(Into::into)
+}
+
+fn insert_into<B: TablePageStoreBuilder>(
+    store_builder: &mut B,
+    table_name: &str,
+    columns: Vec<&str>,
+    values: Vec<Vec<&str>>,
+) -> Result<ExecResult, Error> {
+    todo!()
 }
