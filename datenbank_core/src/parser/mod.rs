@@ -11,6 +11,7 @@ use insert_into::insert_into;
 
 mod create_table;
 mod insert_into;
+mod literal;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
 #[error("error parsing SQL input: {msg}")]
@@ -42,6 +43,13 @@ pub enum ColumnType {
     VarChar(u16),
     Int,
     Bool,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Literal {
+    String(String),
+    Int(i32),
+    Bool(bool),
 }
 
 #[derive(Debug, PartialEq)]
