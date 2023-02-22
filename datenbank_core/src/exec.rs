@@ -11,6 +11,8 @@ pub enum Error {
     Schema(#[from] SchemaError),
     #[error("page store error")]
     PageStore(#[from] PageStoreError),
+    #[error("no such table {0}")]
+    NoSuchTable(String),
 }
 
 pub struct ExecResult {
@@ -64,5 +66,11 @@ fn insert_into<B: TablePageStoreBuilder>(
     columns: Vec<&str>,
     values: Vec<Vec<Literal>>,
 ) -> Result<ExecResult, Error> {
+    let store = store_builder.build(table_name)?;
+    let table = match Table::load(table_name.to_string(), store)? {
+        Some(table) => table,
+        None => return Err(Error::NoSuchTable(table_name.to_string())),
+    };
+
     todo!()
 }

@@ -77,9 +77,19 @@ pub fn parse(input_str: &str) -> Result<Input, Error> {
     }
 }
 
+// identifier and identifier_bytes are identical other than their type signatures. I've so far
+// failed to make them generic due to the large number of types that nom operates on that are
+// seemingly handled differently for &str and &[u8].
+
 // identifiers start with an alphabetic character and can contain alphanumeric and _ as following
 // characters.
-fn identifier(input: &str) -> IResult<&str, &str> {
+pub fn identifier(input: &str) -> IResult<&str, &str> {
+    recognize(pair(alpha1, many0(alt((alphanumeric1, tag("_"))))))(input)
+}
+
+// identifiers start with an alphabetic character and can contain alphanumeric and _ as following
+// characters.
+pub fn identifier_bytes(input: &[u8]) -> IResult<&[u8], &[u8]> {
     recognize(pair(alpha1, many0(alt((alphanumeric1, tag("_"))))))(input)
 }
 

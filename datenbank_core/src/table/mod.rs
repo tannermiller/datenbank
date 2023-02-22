@@ -1,10 +1,9 @@
-use std::io::Write;
-
 use crate::pagestore::{Error as PageError, TablePageStore};
 use crate::schema::Schema;
 use btree::{BTree, Error as BTreeError};
 
 mod btree;
+mod header;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -16,6 +15,8 @@ pub enum Error {
     BTree(#[from] BTreeError),
     #[error("table name must be <= 255 chars")]
     NameTooLong,
+    #[error("error decoding tree: {0}")]
+    DecodingError(String),
 }
 
 // A Table is responsible for the management of everything pertaining to a single database table's
@@ -34,12 +35,8 @@ impl<S: TablePageStore> Table<S> {
             return Err(Error::NameTooLong);
         }
 
-        //if Self::load(name.clone(), store.clone())?.is_some() {
-        //    return Err(Error::TableExists);
-        //}
-
         let tree = BTree::new(name.clone(), schema.clone(), store.clone())?;
-        store.put(0, encode_table_header(&name, &schema, &tree))?;
+        store.put(0, header::encode(&name, &schema, &tree))?;
 
         Ok(Table {
             name,
@@ -51,48 +48,10 @@ impl<S: TablePageStore> Table<S> {
 
     // Load an extant table.
     pub fn load(name: String, store: S) -> Result<Option<Table<S>>, Error> {
+        // TODO: read the table header page and see if there's anything there, if not then return
+        // Ok(None)
         todo!()
     }
-}
-
-// The table header is stored in page 0 of the table page store. It has the following format,
-// starting at byte offset 0:
-//   - 1 byte which stores the length of the table name
-//   - the table name bytes
-//   - 2 bytes to store the length of the encoded schema
-//   - the schema as encoded bytes, the schema is self-decoding
-//   - 2 bytes to store the length of the encoded btree root information
-//   - the encoded btree information, it is most likely just the order and root, but more may
-//     be added
-//   - TBD, probably index information
-fn encode_table_header<S: TablePageStore>(name: &str, schema: &Schema, tree: &BTree<S>) -> Vec<u8> {
-    // guess at the capacity
-    let mut header_bytes = Vec::with_capacity(13 + name.as_bytes().len() + 4 * schema.len());
-
-    header_bytes
-        .write_all(&(name.len() as u8).to_be_bytes())
-        .expect("can't fail writing to vec");
-    header_bytes
-        .write_all(name.as_bytes())
-        .expect("can't fail writing to vec");
-
-    let schema_bytes = schema.encode();
-    header_bytes
-        .write_all(&(schema_bytes.len() as u16).to_be_bytes())
-        .expect("can't fail writing to vec");
-    header_bytes
-        .write_all(&schema_bytes)
-        .expect("can't fail writing to vec");
-
-    let btree_bytes = tree.encode();
-    header_bytes
-        .write_all(&(btree_bytes.len() as u16).to_be_bytes())
-        .expect("can't fail writing to vec");
-    header_bytes
-        .write_all(&btree_bytes)
-        .expect("can't fail writing to vec");
-
-    header_bytes
 }
 
 #[cfg(test)]
