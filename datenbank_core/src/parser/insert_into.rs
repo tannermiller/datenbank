@@ -7,14 +7,23 @@ use nom::IResult;
 use super::literal::literal;
 use super::{identifier, Input, Literal};
 
+// parse a sql statement like "INSERT INTO foo (col1, col2) VALUES (val1, val2), (val3, val4)"
 pub fn insert_into(input: &str) -> IResult<&str, Input> {
-    let (rest, (table_name, _, columns, _)) = tuple((
+    let (rest, (table_name, _, columns, _, values)) = tuple((
         prefix_with_table,
         multispace1,
         column_names,
         pair(tag_no_case("values"), multispace1),
+        values_multi,
     ))(input)?;
-    todo!()
+    Ok((
+        rest,
+        Input::InsertInto {
+            table_name,
+            columns,
+            values,
+        },
+    ))
 }
 
 fn prefix_with_table(input: &str) -> IResult<&str, &str> {
@@ -46,10 +55,12 @@ fn column_names_multi_comma(input: &str) -> IResult<&str, Vec<&str>> {
 }
 
 fn values_multi(input: &str) -> IResult<&str, Vec<Vec<Literal>>> {
-    let (rest, (first_val, rest_vals)) =
-        pair(values_single, many0(pair(multispace1, values_single)))(input)?;
+    let (rest, (first_val, rest_vals)) = pair(
+        values_single,
+        many0(tuple((char(','), multispace1, values_single))),
+    )(input)?;
     let mut values = vec![first_val];
-    for (_, val) in rest_vals {
+    for (_, _, val) in rest_vals {
         values.push(val);
     }
     Ok((rest, values))
@@ -161,6 +172,66 @@ mod test {
 
     #[test]
     fn test_values_multi() {
-        todo!()
+        fn check(input: &str, expected: Option<Vec<Vec<Literal>>>) {
+            parse_check(values_multi, input, expected)
+        }
+
+        check("nope", None);
+        check("(7)", Some(vec![vec![Literal::Int(7)]]));
+        check(
+            "(7), (8)",
+            Some(vec![vec![Literal::Int(7)], vec![Literal::Int(8)]]),
+        );
+        check(
+            "(7),\n  (8), (\"Hello, World!\", FALSE)",
+            Some(vec![
+                vec![Literal::Int(7)],
+                vec![Literal::Int(8)],
+                vec![
+                    Literal::String("Hello, World!".to_string()),
+                    Literal::Bool(false),
+                ],
+            ]),
+        );
+    }
+
+    #[test]
+    fn test_insert_into() {
+        fn check(input: &str, expected: Option<Input>) {
+            parse_check(insert_into, input, expected)
+        }
+
+        check("nope", None);
+        check("INSERT INTO", None);
+        check("INSERT INTO foo", None);
+        check("INSERT INTO foo VALUES", None);
+        check("INSERT INTO foo (col1, col2) VALUES", None);
+        check(
+            "INSERT INTO foo (col1, col2) VALUES (\"val1\", 8)",
+            Some(Input::InsertInto {
+                table_name: "foo",
+                columns: vec!["col1", "col2"],
+                values: vec![vec![Literal::String("val1".to_string()), Literal::Int(8)]],
+            }),
+        );
+        check(
+            "INSERT INTO\nfoo\n(col1, col2)\nVALUES\n(\"val1\", 8)",
+            Some(Input::InsertInto {
+                table_name: "foo",
+                columns: vec!["col1", "col2"],
+                values: vec![vec![Literal::String("val1".to_string()), Literal::Int(8)]],
+            }),
+        );
+        check(
+            "INSERT INTO\nfoo\n(col1, col2)\nVALUES\n(\"val1\", 8),\n(\"val2\", TRUE)",
+            Some(Input::InsertInto {
+                table_name: "foo",
+                columns: vec!["col1", "col2"],
+                values: vec![
+                    vec![Literal::String("val1".to_string()), Literal::Int(8)],
+                    vec![Literal::String("val2".to_string()), Literal::Bool(true)],
+                ],
+            }),
+        );
     }
 }

@@ -30,7 +30,7 @@ pub enum Input<'a> {
     InsertInto {
         table_name: &'a str,
         columns: Vec<&'a str>,
-        values: Vec<Vec<&'a str>>,
+        values: Vec<Vec<Literal>>,
     },
 }
 

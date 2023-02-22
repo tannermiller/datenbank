@@ -1,5 +1,5 @@
 use crate::pagestore::{Error as PageStoreError, TablePageStoreBuilder};
-use crate::parser::{ColumnSchema, ColumnType as ParserColumnType, Input};
+use crate::parser::{ColumnSchema, ColumnType as ParserColumnType, Input, Literal};
 use crate::schema::{ColumnType, Error as SchemaError, Schema};
 use crate::table::{Error as TableError, Table};
 
@@ -62,7 +62,7 @@ fn insert_into<B: TablePageStoreBuilder>(
     store_builder: &mut B,
     table_name: &str,
     columns: Vec<&str>,
-    values: Vec<Vec<&str>>,
+    values: Vec<Vec<Literal>>,
 ) -> Result<ExecResult, Error> {
     todo!()
 }
