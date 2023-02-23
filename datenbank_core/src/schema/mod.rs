@@ -1,10 +1,13 @@
 use std::collections::HashSet;
-use std::io::Write;
+
+mod encode;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
     #[error("column names must be unique, found duplicate {0}")]
     NonUniqueColumn(String),
+    #[error("unable to decode schema: {0}")]
+    UnableToDecode(String),
 }
 
 // The schema describes the columns that make each row in the table.
@@ -116,35 +119,7 @@ impl Schema {
     //     - for variable length columns (e.g. VarChar), the max len is encoded in however many
     //       bytes it requires
     pub fn encode(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(2 + self.len());
-        bytes
-            .write_all(&(self.len() as u16).to_be_bytes())
-            .expect("can't fail writing to vec");
-
-        for column in &self.columns {
-            encode_column_type(column, &mut bytes);
-        }
-
-        bytes
-    }
-}
-
-// See Schema::encode for description of the format
-fn encode_column_type((name, column): &(String, ColumnType), bytes: &mut Vec<u8>) {
-    bytes
-        .write_all(&column.encoded_id().to_be_bytes())
-        .expect("can't fail writing to vec");
-    bytes
-        .write_all(&(name.as_bytes().len() as u16).to_be_bytes())
-        .expect("can't fail writing to vec");
-    bytes
-        .write_all(name.as_bytes())
-        .expect("can't fail writing to vec");
-
-    if let ColumnType::VarChar(max_size) = column {
-        bytes
-            .write_all(&max_size.to_be_bytes())
-            .expect("can't fail writing to vec");
+        encode::encode(self)
     }
 }
 
@@ -186,6 +161,17 @@ impl ColumnType {
             ColumnType::VarChar(_) => 0,
             ColumnType::Int => 1,
             ColumnType::Bool => 2,
+        }
+    }
+
+    fn decode(id: u8) -> Result<Self, Error> {
+        match id {
+            0 => Ok(ColumnType::VarChar(0)),
+            1 => Ok(ColumnType::Int),
+            2 => Ok(ColumnType::Bool),
+            _ => Err(Error::UnableToDecode(
+                "unrecognized encoded column type".to_string(),
+            )),
         }
     }
 }
