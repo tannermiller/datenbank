@@ -2,6 +2,8 @@ use std::collections::HashSet;
 
 mod encode;
 
+pub use encode::decode;
+
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
     #[error("column names must be unique, found duplicate {0}")]

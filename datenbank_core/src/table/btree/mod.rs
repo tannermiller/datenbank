@@ -1,9 +1,8 @@
-use std::io::Write;
-
 use crate::pagestore::{Error as PageError, TablePageStore};
 use crate::schema::Schema;
 use row::Row;
 
+mod encode;
 mod row;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -85,20 +84,7 @@ impl<S: TablePageStore> BTree<S> {
     //   - the root node's page id as a 4 byte integer
     //     - if the root node has not been initialied, then a value of 0 will be stored here
     pub fn encode(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(8);
-        bytes
-            .write_all(&(self.order as u32).to_be_bytes())
-            .expect("can't fail writing to vec");
-        if let Some(root) = &self.root {
-            bytes
-                .write_all(&(root.id as u32).to_be_bytes())
-                .expect("can't fail writing to vec");
-        } else {
-            bytes
-                .write_all(&0u32.to_be_bytes())
-                .expect("can't fail writing to vec");
-        }
-        bytes
+        encode::encode(self)
     }
 }
 
@@ -127,40 +113,4 @@ enum NodeBody {
         // the leaf node to the right of this one, used for table scans
         right_sibling: Option<String>,
     },
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::pagestore::Memory;
-
-    #[test]
-    fn test_encode() {
-        let empty_tree = BTree {
-            name: "something".to_string(),
-            schema: Schema::new(vec![]).unwrap(),
-            order: 1000,
-            root: None,
-            node_cache: vec![],
-            store: Memory::new(64 * 1024),
-        };
-        assert_eq!(vec![0, 0, 3, 232, 0, 0, 0, 0], empty_tree.encode());
-
-        let filled_tree = BTree {
-            name: "something".to_string(),
-            schema: Schema::new(vec![]).unwrap(),
-            order: 1000,
-            root: Some(Node {
-                id: 7,
-                order: 1000,
-                body: NodeBody::Leaf {
-                    rows: vec![],
-                    right_sibling: None,
-                },
-            }),
-            node_cache: vec![],
-            store: Memory::new(64 * 1024),
-        };
-        assert_eq!(vec![0, 0, 3, 232, 0, 0, 0, 7], filled_tree.encode());
-    }
 }

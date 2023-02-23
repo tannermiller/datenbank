@@ -3,13 +3,14 @@ use std::io::Write;
 use nom::error::{make_error, ErrorKind};
 use nom::multi::length_value;
 use nom::number::complete::be_u8;
+use nom::sequence::pair;
 use nom::{Err as NomErr, IResult};
 
 use super::btree::BTree;
 use super::Error;
 use crate::pagestore::TablePageStore;
 use crate::parser::identifier_bytes;
-use crate::schema::Schema;
+use crate::schema::{decode as decode_schema, Schema};
 
 // The table header is stored in page 0 of the table page store. It has the following format,
 // starting at byte offset 0:
@@ -51,9 +52,15 @@ pub fn encode<S: TablePageStore>(name: &str, schema: &Schema, tree: &BTree<S>) -
     header_bytes
 }
 
-fn decode<S: TablePageStore>(header_bytes: &[u8]) -> Result<(String, Schema, BTree<S>), Error> {
-    let (rest, table_name) =
-        parse_table_name(header_bytes).map_err(|e| Error::DecodingError(e.to_string()))?;
+pub fn decode<S: TablePageStore>(header_bytes: &[u8]) -> Result<(String, Schema, BTree<S>), Error> {
+    match decode_parse(header_bytes) {
+        Ok((_, (table_name, schema, tree))) => Ok((table_name, schema, tree)),
+        Err(e) => Err(Error::DecodingError(e.to_string())),
+    }
+}
+
+fn decode_parse<S: TablePageStore>(input: &[u8]) -> IResult<&[u8], (String, Schema, BTree<S>)> {
+    let (rest, (table_name, schema)) = pair(parse_table_name, decode_schema)(input)?;
     todo!()
 }
 
