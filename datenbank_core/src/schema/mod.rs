@@ -296,22 +296,4 @@ mod test {
         ];
         assert_eq!(37, size_of_packed_cols(&cols));
     }
-
-    #[test]
-    fn test_encode() {
-        let schema = Schema::new(vec![
-            ("wonder".into(), ColumnType::Int),
-            ("whats".into(), ColumnType::Bool),
-            ("next".into(), ColumnType::VarChar(10)),
-        ])
-        .unwrap();
-
-        assert_eq!(
-            vec![
-                0, 3, 1, 0, 6, 119, 111, 110, 100, 101, 114, 2, 0, 5, 119, 104, 97, 116, 115, 0, 0,
-                4, 110, 101, 120, 116, 0, 10
-            ],
-            schema.encode()
-        );
-    }
 }

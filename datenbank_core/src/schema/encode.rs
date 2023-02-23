@@ -1,11 +1,12 @@
 use std::io::Write;
 
+use nom::combinator::map;
 use nom::error::{make_error, ErrorKind};
 use nom::multi::{length_count, length_value};
 use nom::number::complete::{be_u16, be_u8};
 use nom::{Err as NomErr, IResult};
 
-use super::{ColumnType, Error, Schema};
+use super::{ColumnType, Schema};
 use crate::parser::identifier_bytes;
 
 pub fn encode(schema: &Schema) -> Vec<u8> {
@@ -40,12 +41,10 @@ fn encode_column_type(name: &str, column: &ColumnType, bytes: &mut Vec<u8>) {
     }
 }
 
-pub fn decode(input: &[u8]) -> Result<Schema, Error> {
-    match length_count(be_u16, parse_column_type)(input) {
-        // TODO: What do I do with the rest of this?
-        Ok((_rest, columns)) => Ok(Schema { columns }),
-        Err(e) => Err(Error::UnableToDecode(e.to_string())),
-    }
+pub fn decode(input: &[u8]) -> IResult<&[u8], Schema> {
+    map(length_count(be_u16, parse_column_type), |columns| Schema {
+        columns,
+    })(input)
 }
 
 fn parse_column_type(input: &[u8]) -> IResult<&[u8], (String, ColumnType)> {
@@ -70,4 +69,45 @@ fn parse_column_type(input: &[u8]) -> IResult<&[u8], (String, ColumnType)> {
     };
 
     Ok((rest, (column_name, column_type)))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_encode() {
+        let schema = Schema::new(vec![
+            ("wonder".into(), ColumnType::Int),
+            ("whats".into(), ColumnType::Bool),
+            ("next".into(), ColumnType::VarChar(10)),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            vec![
+                0, 3, 1, 0, 6, 119, 111, 110, 100, 101, 114, 2, 0, 5, 119, 104, 97, 116, 115, 0, 0,
+                4, 110, 101, 120, 116, 0, 10
+            ],
+            schema.encode()
+        );
+    }
+
+    #[test]
+    fn test_reflective() {
+        let schema = Schema::new(vec![
+            ("wonder".into(), ColumnType::Int),
+            ("whats".into(), ColumnType::Bool),
+            ("next".into(), ColumnType::VarChar(10)),
+            ("send".into(), ColumnType::Bool),
+            ("the".into(), ColumnType::VarChar(9999)),
+            ("pain".into(), ColumnType::Int),
+            ("below".into(), ColumnType::Int),
+        ])
+        .unwrap();
+
+        let bytes = schema.encode();
+        let (_, decoded) = decode(&bytes).unwrap();
+        assert_eq!(schema, decoded);
+    }
 }
