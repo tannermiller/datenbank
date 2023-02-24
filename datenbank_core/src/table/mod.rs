@@ -86,5 +86,12 @@ mod test {
             ],
             table_header_page
         );
+
+        let (decoded_name, decoded_schema, decoded_btree) =
+            header::decode(&table_header_page, store).unwrap();
+        assert_eq!(name, decoded_name);
+        assert_eq!(schema, decoded_schema);
+        assert_eq!(table.tree.order, decoded_btree.order);
+        assert_eq!(table.tree.root, decoded_btree.root);
     }
 }

@@ -5,6 +5,8 @@ use row::Row;
 mod encode;
 mod row;
 
+pub use encode::decode;
+
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
     #[error("io error attempting operation")]
@@ -20,13 +22,13 @@ pub enum Error {
 // BTRee is a B+ tree that stores the data in a key value store.
 pub struct BTree<S: TablePageStore> {
     // the name of this tree, often its the table or index name
-    name: String,
-    schema: Schema,
+    pub(crate) name: String,
+    pub(crate) schema: Schema,
     // the order or branching factor of the B+ Tree
-    order: usize,
-    root: Option<Node>,
-    node_cache: Vec<Node>,
-    store: S,
+    pub(crate) order: usize,
+    pub(crate) root: Option<usize>,
+    pub(crate) node_cache: Vec<Node>,
+    pub(crate) store: S,
 }
 
 impl<S: TablePageStore> BTree<S> {
@@ -90,7 +92,7 @@ impl<S: TablePageStore> BTree<S> {
 
 // This represents a single node in the B+ Tree, it contains the metadata of the node as well as
 // the node body itself.
-struct Node {
+pub(crate) struct Node {
     // The ID of this node acts as the key we use to store it with.
     id: usize,
     // the order or branching factor of this B+ Tree

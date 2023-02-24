@@ -2,11 +2,11 @@ use std::io::Write;
 
 use nom::error::{make_error, ErrorKind};
 use nom::multi::length_value;
-use nom::number::complete::be_u8;
-use nom::sequence::pair;
+use nom::number::complete::{be_u16, be_u8};
+use nom::sequence::tuple;
 use nom::{Err as NomErr, IResult};
 
-use super::btree::BTree;
+use super::btree::{decode as decode_btree, BTree};
 use super::Error;
 use crate::pagestore::TablePageStore;
 use crate::parser::identifier_bytes;
@@ -52,20 +52,34 @@ pub fn encode<S: TablePageStore>(name: &str, schema: &Schema, tree: &BTree<S>) -
     header_bytes
 }
 
-pub fn decode<S: TablePageStore>(header_bytes: &[u8]) -> Result<(String, Schema, BTree<S>), Error> {
-    match decode_parse(header_bytes) {
-        Ok((_, (table_name, schema, tree))) => Ok((table_name, schema, tree)),
-        Err(e) => Err(Error::DecodingError(e.to_string())),
-    }
+pub fn decode<S: TablePageStore>(
+    header_bytes: &[u8],
+    store: S,
+) -> Result<(String, Schema, BTree<S>), Error> {
+    let (_, (name, schema, order, root)) =
+        decode_parse(header_bytes).map_err(|e| Error::DecodingError(e.to_string()))?;
+    let tree = BTree {
+        name: name.clone(),
+        order,
+        schema: schema.clone(),
+        root,
+        node_cache: Vec::new(),
+        store,
+    };
+    Ok((name, schema, tree))
 }
 
-fn decode_parse<S: TablePageStore>(input: &[u8]) -> IResult<&[u8], (String, Schema, BTree<S>)> {
-    let (rest, (table_name, schema)) = pair(parse_table_name, decode_schema)(input)?;
-    todo!()
+fn decode_parse(input: &[u8]) -> IResult<&[u8], (String, Schema, usize, Option<usize>)> {
+    let (rest, (table_name, schema, (order, root))) = tuple((
+        length_value(be_u8, parse_table_name),
+        length_value(be_u16, decode_schema),
+        length_value(be_u16, decode_btree),
+    ))(input)?;
+    Ok((rest, (table_name, schema, order, root)))
 }
 
 fn parse_table_name(input: &[u8]) -> IResult<&[u8], String> {
-    let (rest, table_name_bytes) = length_value(be_u8, identifier_bytes)(input)?;
+    let (rest, table_name_bytes) = identifier_bytes(input)?;
     match String::from_utf8(table_name_bytes.to_vec()) {
         Ok(table_name) => Ok((rest, table_name)),
         Err(_) => Err(NomErr::Failure(make_error(input, ErrorKind::Verify))),
