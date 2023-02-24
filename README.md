@@ -20,3 +20,5 @@ This is a toy database that I'm building just to learn more about how databases 
 9) Server
 10) Client library
 11) CLI using client lib
+12) Github actions for CI
+13) Arch diagrams
