@@ -20,6 +20,7 @@ pub enum Error {
 // like before I can determine what how exactly that works.
 
 // BTRee is a B+ tree that stores the data in a key value store.
+#[derive(Debug)]
 pub struct BTree<S: TablePageStore> {
     // the name of this tree, often its the table or index name
     pub(crate) name: String,
@@ -92,6 +93,7 @@ impl<S: TablePageStore> BTree<S> {
 
 // This represents a single node in the B+ Tree, it contains the metadata of the node as well as
 // the node body itself.
+#[derive(Debug)]
 pub(crate) struct Node {
     // The ID of this node acts as the key we use to store it with.
     id: usize,
@@ -101,6 +103,7 @@ pub(crate) struct Node {
 }
 
 // This represents which type this node is and contains the type-specific data for each one.
+#[derive(Debug)]
 enum NodeBody {
     // Internal nodes contain the boundary keys (first of each next child) and the pointers to the
     // child nodes. No rows are stored here.

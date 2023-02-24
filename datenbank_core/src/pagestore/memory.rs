@@ -4,13 +4,14 @@ use std::rc::Rc;
 
 use super::{Error, TablePageStore, TablePageStoreBuilder};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Memory {
     inner: Rc<RefCell<Inner>>,
 }
 
 // use an inner struct with all the functionality so we can support Clone on the TablePageStore
 // implementation.
+#[derive(Debug)]
 struct Inner {
     page_size: usize,
     last_page: usize,
@@ -107,24 +108,14 @@ impl TablePageStore for Memory {
     }
 }
 
-pub struct MemoryBuilder {
+#[derive(Debug)]
+struct BuilderInner {
     page_size: usize,
     tables: HashMap<String, Memory>,
 }
 
-impl MemoryBuilder {
-    pub fn new(page_size: usize) -> Self {
-        MemoryBuilder {
-            tables: HashMap::new(),
-            page_size,
-        }
-    }
-}
-
-impl TablePageStoreBuilder for MemoryBuilder {
-    type TablePageStore = Memory;
-
-    fn build(&mut self, table_name: &str) -> Result<Self::TablePageStore, Error> {
+impl BuilderInner {
+    fn build(&mut self, table_name: &str) -> Result<Memory, Error> {
         if let Some(page_store) = self.tables.get(table_name) {
             return Ok(page_store.clone());
         }
@@ -133,6 +124,30 @@ impl TablePageStoreBuilder for MemoryBuilder {
         let ret_page_store = page_store.clone();
         self.tables.insert(table_name.to_string(), page_store);
         Ok(ret_page_store)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MemoryBuilder {
+    inner: Rc<RefCell<BuilderInner>>,
+}
+
+impl MemoryBuilder {
+    pub fn new(page_size: usize) -> Self {
+        MemoryBuilder {
+            inner: Rc::new(RefCell::new(BuilderInner {
+                tables: HashMap::new(),
+                page_size,
+            })),
+        }
+    }
+}
+
+impl TablePageStoreBuilder for MemoryBuilder {
+    type TablePageStore = Memory;
+
+    fn build(&mut self, table_name: &str) -> Result<Self::TablePageStore, Error> {
+        self.inner.borrow_mut().build(table_name)
     }
 }
 

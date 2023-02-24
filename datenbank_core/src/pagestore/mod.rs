@@ -17,7 +17,7 @@ pub enum Error {
 // associated with this store and can not be changed after it has been established. Each
 // implementation of this should automatically allocate the 0-indexed page at initial creation
 // time. That 0th page will be used for table header information and not for table content.
-pub trait TablePageStore: Clone {
+pub trait TablePageStore: Clone + std::fmt::Debug {
     // Allocate and prepare a new page in persistence, returning the page id.
     fn allocate(&mut self) -> Result<usize, Error>;
 
@@ -39,7 +39,7 @@ pub trait TablePageStore: Clone {
 }
 
 // TablePageStoreBuilder is responsible for constructing TablePageStores for a given table.
-pub trait TablePageStoreBuilder {
+pub trait TablePageStoreBuilder: Clone + std::fmt::Debug {
     type TablePageStore: TablePageStore;
 
     // Build may either create an entirely new instance of a TablePageStore, or return a clone of

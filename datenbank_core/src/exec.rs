@@ -20,7 +20,7 @@ pub struct ExecResult {
 }
 
 pub fn execute<B: TablePageStoreBuilder>(
-    store_builder: &mut B,
+    store_builder: B,
     input: Input,
 ) -> Result<ExecResult, Error> {
     match input {
@@ -34,13 +34,12 @@ pub fn execute<B: TablePageStoreBuilder>(
 }
 
 fn create_table<B: TablePageStoreBuilder>(
-    store_builder: &mut B,
+    store_builder: B,
     table_name: &str,
     schema: Vec<ColumnSchema>,
 ) -> Result<ExecResult, Error> {
-    let store = store_builder.build(table_name)?;
     let schema = parser_schema_to_table_schema(schema)?;
-    Table::create(table_name.to_string(), schema, store)?;
+    Table::create(table_name.to_string(), schema, store_builder)?;
     Ok(ExecResult { rows_affected: 0 })
 }
 
@@ -61,13 +60,12 @@ fn parser_schema_to_table_schema(parser_schema: Vec<ColumnSchema>) -> Result<Sch
 }
 
 fn insert_into<B: TablePageStoreBuilder>(
-    store_builder: &mut B,
+    store_builder: B,
     table_name: &str,
     columns: Vec<&str>,
     values: Vec<Vec<Literal>>,
 ) -> Result<ExecResult, Error> {
-    let store = store_builder.build(table_name)?;
-    let table = match Table::load(table_name.to_string(), store)? {
+    let table = match Table::load(table_name, store_builder)? {
         Some(table) => table,
         None => return Err(Error::NoSuchTable(table_name.to_string())),
     };
