@@ -52,6 +52,16 @@ pub enum Literal {
     Bool(bool),
 }
 
+impl std::fmt::Display for Literal {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        match self {
+            Literal::String(s) => write!(f, "\"{s}\""),
+            Literal::Int(i) => i.fmt(f),
+            Literal::Bool(b) => write!(f, "{}", b.to_string().to_uppercase()),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct ColumnSchema<'a> {
     pub column_name: &'a str,

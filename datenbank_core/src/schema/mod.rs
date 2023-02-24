@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use crate::parser::Literal;
+
 mod encode;
 
 pub use encode::decode;
@@ -10,6 +12,8 @@ pub enum Error {
     NonUniqueColumn(String),
     #[error("unable to decode schema: {0}")]
     UnableToDecode(String),
+    #[error("invalid column {0}")]
+    InvalidColumn(String),
 }
 
 // The schema describes the columns that make each row in the table.
@@ -123,6 +127,81 @@ impl Schema {
     pub fn encode(&self) -> Vec<u8> {
         encode::encode(self)
     }
+
+    pub fn literals_to_columns(
+        &self,
+        column_order: &[String],
+        literals: Vec<Vec<Literal>>,
+    ) -> Result<Vec<Vec<Column>>, Error> {
+        if column_order.is_empty() {
+            return Err(Error::InvalidColumn(
+                "column names must be non-empty".to_string(),
+            ));
+        }
+
+        if literals.is_empty() {
+            return Err(Error::InvalidColumn(
+                "literals must be non-empty".to_string(),
+            ));
+        }
+
+        // ensure the column names are valid and find their location in self.columns so we don't
+        // have to iterate them more
+        let mut col_types_in_order = Vec::with_capacity(column_order.len());
+        for column in column_order {
+            let mut found_column = None;
+            for (col_name, col) in self.columns.iter() {
+                if col_name == column {
+                    found_column = Some(col);
+                    break;
+                }
+            }
+
+            if let Some(col) = found_column {
+                col_types_in_order.push(col);
+            } else {
+                return Err(Error::InvalidColumn(column.to_string()));
+            }
+        }
+
+        let mut column_values = Vec::with_capacity(literals.len());
+        for lit_value in literals {
+            if lit_value.len() != col_types_in_order.len() {
+                return Err(Error::InvalidColumn(format!(
+                    "({})",
+                    lit_value
+                        .into_iter()
+                        .map(|l| l.to_string())
+                        .collect::<Vec<String>>()
+                        .join(",")
+                )));
+            }
+
+            let col_vals = col_types_in_order
+                .iter()
+                .zip(lit_value.into_iter())
+                .map(|(col_type, literal)| match (col_type, literal) {
+                    (ColumnType::VarChar(max_size), Literal::String(s))
+                        if s.len() <= *max_size as usize =>
+                    {
+                        Ok(Column::VarChar(s))
+                    }
+
+                    (ColumnType::Int, Literal::Int(i)) => Ok(Column::Int(i)),
+
+                    (ColumnType::Bool, Literal::Bool(b)) => Ok(Column::Bool(b)),
+
+                    (ct, l) => Err(Error::InvalidColumn(format!(
+                        "{l} is not congruent to column type {ct}",
+                    ))),
+                })
+                .collect::<Result<Vec<Column>, _>>()?;
+
+            column_values.push(col_vals);
+        }
+
+        Ok(column_values)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -174,6 +253,16 @@ impl ColumnType {
             _ => Err(Error::UnableToDecode(
                 "unrecognized encoded column type".to_string(),
             )),
+        }
+    }
+}
+
+impl std::fmt::Display for ColumnType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        match self {
+            ColumnType::VarChar(size) => write!(f, "VARCHAR({size})"),
+            ColumnType::Int => write!(f, "INT"),
+            ColumnType::Bool => write!(f, "BOOL"),
         }
     }
 }
@@ -297,5 +386,78 @@ mod test {
             Column::Bool(true),
         ];
         assert_eq!(37, size_of_packed_cols(&cols));
+    }
+
+    #[test]
+    fn test_literals_to_columns() {
+        fn check(
+            schema: &Schema,
+            col_order: &[String],
+            literals: Vec<Vec<Literal>>,
+            expected: Option<Vec<Vec<Column>>>,
+        ) {
+            let result = schema.literals_to_columns(col_order, literals);
+            match (result, expected) {
+                (Ok(cols), Some(exp)) => assert_eq!(exp, cols),
+                (Err(_), None) => (),
+                (Ok(_), None) => panic!("shouldn't have passed"),
+                (Err(err), Some(_)) => panic!("should't have errored: {}", err),
+            }
+        }
+
+        let schema = Schema::new(vec![
+            ("foo".into(), ColumnType::Int),
+            ("bar".into(), ColumnType::Bool),
+            ("qux".into(), ColumnType::VarChar(10)),
+        ])
+        .unwrap();
+
+        check(&schema, &vec![], vec![], None);
+        check(&schema, &vec!["foo".to_string()], vec![], None);
+        check(&schema, &vec!["foo".to_string()], vec![vec![]], None);
+        check(
+            &schema,
+            &vec!["foo".to_string()],
+            vec![vec![Literal::Bool(true)]],
+            None,
+        );
+        check(
+            &schema,
+            &vec!["foo".to_string()],
+            vec![vec![Literal::Int(7)]],
+            Some(vec![vec![Column::Int(7)]]),
+        );
+        check(
+            &schema,
+            &vec!["foo".to_string()],
+            vec![vec![Literal::Int(7), Literal::Bool(false)]],
+            None,
+        );
+        check(
+            &schema,
+            &vec!["foo".to_string()],
+            vec![vec![Literal::Int(7)], vec![Literal::Int(8)]],
+            Some(vec![vec![Column::Int(7)], vec![Column::Int(8)]]),
+        );
+        check(
+            &schema,
+            &vec!["qux".to_string(), "foo".to_string()],
+            vec![vec![Literal::Int(7), Literal::String("bump".to_string())]],
+            None,
+        );
+        check(
+            &schema,
+            &vec!["qux".to_string(), "foo".to_string(), "bar".to_string()],
+            vec![vec![
+                Literal::String("bump".to_string()),
+                Literal::Int(7),
+                Literal::Bool(false),
+            ]],
+            Some(vec![vec![
+                Column::VarChar("bump".to_string()),
+                Column::Int(7),
+                Column::Bool(false),
+            ]]),
+        );
     }
 }
