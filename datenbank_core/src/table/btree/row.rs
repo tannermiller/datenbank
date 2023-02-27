@@ -67,12 +67,6 @@ pub(crate) enum RowVarChar {
 
 impl Row {
     pub(crate) fn from_columns(schema: Schema, cols: Vec<Column>) -> Option<Self> {
-        // TODO: I already validated this at the table level in inser(), do I need to do this here?
-        //       But this can probably be gotten to from multiple paths, so better to do this here.
-        //if !schema.validate_columns(&cols) {
-        //    return None;
-        //}
-
         let row_cols = cols
             .into_iter()
             .map(|col| match col {

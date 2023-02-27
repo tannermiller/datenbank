@@ -1,5 +1,5 @@
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
-use crate::schema::{Column, Schema};
+use crate::schema::{Column, Error as SchemaError, Schema};
 use btree::{BTree, Error as BTreeError};
 
 mod btree;
@@ -13,6 +13,8 @@ pub enum Error {
     TableExists,
     #[error("error from btree")]
     BTree(#[from] BTreeError),
+    #[error("schema error")]
+    Schema(#[from] SchemaError),
     #[error("table name must be <= 255 chars")]
     NameTooLong,
     #[error("error decoding tree: {0}")]
@@ -75,27 +77,11 @@ impl<B: TablePageStoreBuilder> Table<B> {
 
     // Insert the values into the specified columns. Returns the number of rows updated.
     pub fn insert(&mut self, columns: &[&str], values: Vec<Vec<Column>>) -> Result<usize, Error> {
-        // TODO: We can probably push this down into Schema::validate_columns()
         // For now, we only support inserting fully specififed rows, so we need to ensure that
-        // every column is present in our inserted columns. This is roughly O(n^2), but should be
-        // fine for relatively small #'s of columns. We're also only doing this once rather than
-        // for every individual set of values.
-        for (schema_col, _) in self.schema.columns() {
-            let mut found = false;
-            for col in columns {
-                if col == schema_col {
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                return Err(Error::InvalidInsert(format!(
-                    "column {schema_col} was not found in inserted columns"
-                )));
-            }
-        }
+        // every column is present in our inserted columns.
+        let values_in_order = self.schema.put_columns_in_order(columns, values)?;
 
-        self.tree.insert(columns, values).map_err(Into::into)
+        self.tree.insert(values_in_order).map_err(Into::into)
     }
 }
 

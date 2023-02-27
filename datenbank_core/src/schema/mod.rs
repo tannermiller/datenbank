@@ -226,6 +226,56 @@ impl Schema {
     pub fn columns(&self) -> &[(String, ColumnType)] {
         &self.columns
     }
+
+    pub fn put_columns_in_order(
+        &self,
+        column_order: &[&str],
+        columns_to_order: Vec<Vec<Column>>,
+    ) -> Result<Vec<Vec<Column>>, Error> {
+        if column_order.len() != self.columns.len() {
+            return Err(Error::InvalidColumn(
+                "must have same numer of columns as schema".to_string(),
+            ));
+        }
+
+        let mut ordering = Vec::with_capacity(column_order.len());
+        for co in column_order {
+            let mut found = false;
+            for (i, (col_name, _)) in self.columns.iter().enumerate() {
+                if co == col_name {
+                    ordering.push(i);
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                return Err(Error::InvalidColumn(format!(
+                    "{co} is not a defined column"
+                )));
+            }
+        }
+
+        let ordered = columns_to_order
+            .into_iter()
+            .map(|cto| {
+                if cto.len() < ordering.len() {
+                    return Err(Error::InvalidColumn(
+                        "values must have same number of columns as schema".to_string(),
+                    ));
+                }
+                let mut to_order = vec![Column::Bool(false); cto.len()];
+
+                for (col, next) in cto.into_iter().zip(ordering.iter()) {
+                    to_order[*next] = col;
+                }
+
+                Ok(to_order)
+            })
+            .collect::<Result<Vec<Vec<Column>>, _>>()?;
+
+        Ok(ordered)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -506,5 +556,59 @@ mod test {
             .unwrap(),
             519,
         );
+    }
+
+    #[test]
+    fn test_put_columns_in_order() {
+        fn check(
+            schema: &Schema,
+            column_order: &[&str],
+            cols: Vec<Vec<Column>>,
+            expected: Option<Vec<Vec<Column>>>,
+        ) {
+            let result = schema.put_columns_in_order(column_order, cols);
+            match (result, expected) {
+                (Ok(cols), Some(exp)) => assert_eq!(exp, cols),
+                (Err(_), None) => (),
+                (Ok(_), None) => panic!("shouldn't have passed"),
+                (Err(err), Some(_)) => panic!("should't have errored: {}", err),
+            }
+        }
+
+        let schema = Schema::new(vec![
+            ("foo".into(), ColumnType::Int),
+            ("bar".into(), ColumnType::Bool),
+            ("qux".into(), ColumnType::VarChar(10)),
+        ])
+        .unwrap();
+
+        let cols = vec![vec![
+            Column::Int(1),
+            Column::Bool(true),
+            Column::VarChar("hello".to_string()),
+        ]];
+        check(&schema, &["foo", "bar", "qux"], cols.clone(), Some(cols));
+
+        let cols = vec![vec![
+            Column::Int(1),
+            Column::Bool(true),
+            Column::VarChar("hello".to_string()),
+        ]];
+        check(&schema, &[], cols, None);
+
+        let cols = vec![vec![Column::Int(1), Column::Bool(true)]];
+        check(&schema, &["foo", "bar", "qux"], cols, None);
+
+        let cols = vec![vec![
+            Column::VarChar("hello".to_string()),
+            Column::Bool(true),
+            Column::Int(1),
+        ]];
+        let correct_cols = vec![vec![
+            Column::Int(1),
+            Column::Bool(true),
+            Column::VarChar("hello".to_string()),
+        ]];
+        check(&schema, &["qux", "bar", "foo"], cols, Some(correct_cols));
     }
 }

@@ -52,8 +52,9 @@ impl<S: TablePageStore> BTree<S> {
     }
 
     // Insert the row according to the key specificed by the btree schema. Returns the number of
-    // rows affected.
-    pub fn insert(&mut self, columns: &[&str], values: Vec<Vec<Column>>) -> Result<usize, Error> {
+    // rows affected. We currently only allow inserting fully specified rows so these must already
+    // be put in order via schema.put_columns_in_order().
+    pub fn insert(&mut self, values: Vec<Vec<Column>>) -> Result<usize, Error> {
         // first of all, handle an empty tree.
         if self.root.is_none() {
             let root_id = self.store.allocate()?;
@@ -64,7 +65,9 @@ impl<S: TablePageStore> BTree<S> {
             self.node_cache.insert(root_id, root_node);
         }
 
-        for value in values {}
+        for value in values {
+            // TODO: convert to row::Row and do the allocation of outside pages as part of it
+        }
 
         todo!()
     }
