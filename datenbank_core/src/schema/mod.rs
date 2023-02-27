@@ -6,6 +6,10 @@ mod encode;
 
 pub use encode::decode;
 
+// The maximum length that any variable length field will store inline in a row. Any amount over
+// this amount will be stored external to the leaf page.
+const MAX_INLINE_VAR_LEN_COL_SIZE: usize = 512;
+
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
     #[error("column names must be unique, found duplicate {0}")]
@@ -35,6 +39,7 @@ impl Schema {
         Ok(Schema { columns })
     }
 
+    // TODO: replace this with the actual parsing logic, that is enough validation, probably
     pub fn validate_packed(&self, packed_row: &[u8]) -> bool {
         let mut i = 0;
         for (_, col) in self.columns.iter() {
@@ -128,9 +133,11 @@ impl Schema {
         encode::encode(self)
     }
 
+    // Validate and convert the set of column names with sets of values in the same order against
+    // this schema.
     pub fn literals_to_columns(
         &self,
-        column_order: &[String],
+        column_order: &[&str],
         literals: Vec<Vec<Literal>>,
     ) -> Result<Vec<Vec<Column>>, Error> {
         if column_order.is_empty() {
@@ -202,6 +209,23 @@ impl Schema {
 
         Ok(column_values)
     }
+
+    // Determine the maximum size of a row inline in the leaf node. Anything over this size will be
+    // stored externally to the row.
+    pub fn max_inline_row_size(&self) -> usize {
+        self.columns.iter().fold(0, |acc, (_, col)| match col {
+            // size of len (2 bytes) + size of data itself
+            ColumnType::VarChar(size) => {
+                acc + 2 + std::cmp::min(*size as usize, MAX_INLINE_VAR_LEN_COL_SIZE)
+            }
+            ColumnType::Int => acc + 4,
+            ColumnType::Bool => acc + 1,
+        })
+    }
+
+    pub fn columns(&self) -> &[(String, ColumnType)] {
+        &self.columns
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -214,12 +238,14 @@ pub enum Column {
     Bool(bool),
 }
 
-// TODO: This doesn't take off-page storage into account
-// Find the total allocated size of bytes we need to fit these columns.
+// Find the total allocated size of bytes we need to fit these columns in a node.
 pub fn size_of_packed_cols(cols: &[Column]) -> usize {
     cols.iter().fold(0, |acc, col| match col {
         // size of len (2 bytes) + size of data itself
-        Column::VarChar(s) => acc + 2 + s.as_bytes().len(),
+        Column::VarChar(s) => {
+            let size = s.as_bytes().len();
+            acc + 2 + std::cmp::min(size, MAX_INLINE_VAR_LEN_COL_SIZE)
+        }
         Column::Int(_) => acc + 4,
         Column::Bool(_) => acc + 1,
     })
@@ -392,7 +418,7 @@ mod test {
     fn test_literals_to_columns() {
         fn check(
             schema: &Schema,
-            col_order: &[String],
+            col_order: &[&str],
             literals: Vec<Vec<Literal>>,
             expected: Option<Vec<Vec<Column>>>,
         ) {
@@ -413,41 +439,36 @@ mod test {
         .unwrap();
 
         check(&schema, &vec![], vec![], None);
-        check(&schema, &vec!["foo".to_string()], vec![], None);
-        check(&schema, &vec!["foo".to_string()], vec![vec![]], None);
+        check(&schema, &vec!["foo"], vec![], None);
+        check(&schema, &vec!["foo"], vec![vec![]], None);
+        check(&schema, &vec!["foo"], vec![vec![Literal::Bool(true)]], None);
         check(
             &schema,
-            &vec!["foo".to_string()],
-            vec![vec![Literal::Bool(true)]],
-            None,
-        );
-        check(
-            &schema,
-            &vec!["foo".to_string()],
+            &vec!["foo"],
             vec![vec![Literal::Int(7)]],
             Some(vec![vec![Column::Int(7)]]),
         );
         check(
             &schema,
-            &vec!["foo".to_string()],
+            &vec!["foo"],
             vec![vec![Literal::Int(7), Literal::Bool(false)]],
             None,
         );
         check(
             &schema,
-            &vec!["foo".to_string()],
+            &vec!["foo"],
             vec![vec![Literal::Int(7)], vec![Literal::Int(8)]],
             Some(vec![vec![Column::Int(7)], vec![Column::Int(8)]]),
         );
         check(
             &schema,
-            &vec!["qux".to_string(), "foo".to_string()],
+            &vec!["qux", "foo"],
             vec![vec![Literal::Int(7), Literal::String("bump".to_string())]],
             None,
         );
         check(
             &schema,
-            &vec!["qux".to_string(), "foo".to_string(), "bar".to_string()],
+            &vec!["qux", "foo", "bar"],
             vec![vec![
                 Literal::String("bump".to_string()),
                 Literal::Int(7),
@@ -458,6 +479,32 @@ mod test {
                 Column::Int(7),
                 Column::Bool(false),
             ]]),
+        );
+    }
+
+    #[test]
+    fn test_max_inline_row_size() {
+        fn check(schema: &Schema, expected: usize) {
+            assert_eq!(expected, schema.max_inline_row_size());
+        }
+
+        check(
+            &Schema::new(vec![
+                ("foo".into(), ColumnType::Int),
+                ("bar".into(), ColumnType::Bool),
+                ("qux".into(), ColumnType::VarChar(10)),
+            ])
+            .unwrap(),
+            17,
+        );
+        check(
+            &Schema::new(vec![
+                ("foo".into(), ColumnType::Int),
+                ("bar".into(), ColumnType::Bool),
+                ("qux".into(), ColumnType::VarChar(1024)),
+            ])
+            .unwrap(),
+            519,
         );
     }
 }

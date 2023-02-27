@@ -65,10 +65,14 @@ fn insert_into<B: TablePageStoreBuilder>(
     columns: Vec<&str>,
     values: Vec<Vec<Literal>>,
 ) -> Result<ExecResult, Error> {
-    let table = match Table::load(table_name, store_builder)? {
+    let mut table = match Table::load(table_name, store_builder)? {
         Some(table) => table,
         None => return Err(Error::NoSuchTable(table_name.to_string())),
     };
 
-    todo!()
+    let column_values = table.schema().literals_to_columns(&columns, values)?;
+
+    let rows_affected = table.insert(&columns, column_values)?;
+
+    Ok(ExecResult { rows_affected })
 }

@@ -52,7 +52,7 @@ mod test {
             schema: Schema::new(vec![]).unwrap(),
             order: 1000,
             root: None,
-            node_cache: vec![],
+            node_cache: HashMap::new(),
             store: Memory::new(64 * 1024),
         };
         assert_eq!(vec![0, 0, 3, 232, 0, 0, 0, 0], encode(&empty_tree));
@@ -62,7 +62,7 @@ mod test {
             schema: Schema::new(vec![]).unwrap(),
             order: 1000,
             root: Some(7),
-            node_cache: vec![],
+            node_cache: HashMap::new(),
             store: Memory::new(64 * 1024),
         };
         let encoded = encode(&filled_tree);

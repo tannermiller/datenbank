@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Write;
 
 use nom::error::{make_error, ErrorKind};
@@ -63,7 +64,7 @@ pub fn decode<S: TablePageStore>(
         order,
         schema: schema.clone(),
         root,
-        node_cache: Vec::new(),
+        node_cache: HashMap::new(),
         store,
     };
     Ok((name, schema, tree))
