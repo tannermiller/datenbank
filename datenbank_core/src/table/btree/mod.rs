@@ -18,6 +18,8 @@ pub enum Error {
     Io(#[from] PageError),
     #[error("attempted to insert duplicate entry with key {0}")]
     DuplicateEntry(String),
+    #[error("invalid column: {0}")]
+    InvalidColumn(String),
 }
 
 // BTRee is a B+ tree that stores the data in a key value store.
@@ -30,6 +32,7 @@ pub struct BTree<S: TablePageStore> {
     pub(crate) order: usize,
     pub(crate) root: Option<usize>,
     pub(crate) node_cache: HashMap<usize, Node>,
+    pub(crate) data_cache: HashMap<usize, Vec<u8>>,
     pub(crate) store: S,
 }
 
@@ -47,6 +50,7 @@ impl<S: TablePageStore> BTree<S> {
             schema,
             root: None,
             node_cache: HashMap::new(),
+            data_cache: HashMap::new(),
             store,
         })
     }
@@ -66,6 +70,7 @@ impl<S: TablePageStore> BTree<S> {
         }
 
         for value in values {
+            let row = Row::from_columns(self.schema.clone(), value);
             // TODO: convert to row::Row and do the allocation of outside pages as part of it
         }
 

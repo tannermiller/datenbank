@@ -8,7 +8,7 @@ pub use encode::decode;
 
 // The maximum length that any variable length field will store inline in a row. Any amount over
 // this amount will be stored external to the leaf page.
-const MAX_INLINE_VAR_LEN_COL_SIZE: usize = 512;
+pub const MAX_INLINE_VAR_LEN_COL_SIZE: usize = 512;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {

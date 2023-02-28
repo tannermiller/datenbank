@@ -44,3 +44,50 @@ impl<S: TablePageStore> NodeCache<S> {
         todo!()
     }
 }
+
+struct DataWrapper {
+    data: Vec<u8>,
+    was_mutated: bool,
+}
+
+impl DataWrapper {
+    fn new(data: Vec<u8>) -> Self {
+        DataWrapper {
+            data,
+            was_mutated: false,
+        }
+    }
+
+    fn new_mutated(data: Vec<u8>) -> Self {
+        DataWrapper {
+            data,
+            was_mutated: true,
+        }
+    }
+}
+
+pub struct DataCache<S: TablePageStore> {
+    cache: HashMap<usize, DataWrapper>,
+    store: S,
+}
+
+impl<S: TablePageStore> DataCache<S> {
+    pub(crate) fn new(store: S) -> Self {
+        DataCache {
+            cache: HashMap::new(),
+            store,
+        }
+    }
+
+    pub(crate) fn put_new(&mut self, data: Vec<u8>) -> Result<usize, Error> {
+        let data_id = self.store.allocate()?;
+
+        self.cache.insert(data_id, DataWrapper::new_mutated(data));
+
+        Ok(data_id)
+    }
+
+    pub(crate) fn page_size(&self) -> usize {
+        self.store.usable_page_size()
+    }
+}

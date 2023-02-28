@@ -65,6 +65,7 @@ pub fn decode<S: TablePageStore>(
         schema: schema.clone(),
         root,
         node_cache: HashMap::new(),
+        data_cache: HashMap::new(),
         store,
     };
     Ok((name, schema, tree))
