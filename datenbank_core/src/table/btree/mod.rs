@@ -2,10 +2,11 @@ use std::collections::HashMap;
 
 use crate::pagestore::{Error as PageError, TablePageStore};
 use crate::schema::{Column, Schema};
+use cache::DataCache;
 use node::Node;
 use row::Row;
 
-mod cache;
+pub mod cache;
 mod encode;
 mod node;
 mod row;
@@ -32,7 +33,7 @@ pub struct BTree<S: TablePageStore> {
     pub(crate) order: usize,
     pub(crate) root: Option<usize>,
     pub(crate) node_cache: HashMap<usize, Node>,
-    pub(crate) data_cache: HashMap<usize, Vec<u8>>,
+    pub(crate) data_cache: DataCache<S>,
     pub(crate) store: S,
 }
 
@@ -50,7 +51,7 @@ impl<S: TablePageStore> BTree<S> {
             schema,
             root: None,
             node_cache: HashMap::new(),
-            data_cache: HashMap::new(),
+            data_cache: DataCache::new(store.clone()),
             store,
         })
     }
@@ -70,7 +71,7 @@ impl<S: TablePageStore> BTree<S> {
         }
 
         for value in values {
-            let row = Row::from_columns(self.schema.clone(), value);
+            let row = Row::from_columns(self.schema.clone(), &mut self.data_cache, value);
             // TODO: convert to row::Row and do the allocation of outside pages as part of it
         }
 

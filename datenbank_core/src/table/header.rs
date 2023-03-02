@@ -7,6 +7,7 @@ use nom::number::complete::{be_u16, be_u8};
 use nom::sequence::tuple;
 use nom::{Err as NomErr, IResult};
 
+use super::btree::cache::DataCache;
 use super::btree::{decode as decode_btree, BTree};
 use super::Error;
 use crate::pagestore::TablePageStore;
@@ -65,7 +66,7 @@ pub fn decode<S: TablePageStore>(
         schema: schema.clone(),
         root,
         node_cache: HashMap::new(),
-        data_cache: HashMap::new(),
+        data_cache: DataCache::new(store.clone()),
         store,
     };
     Ok((name, schema, tree))

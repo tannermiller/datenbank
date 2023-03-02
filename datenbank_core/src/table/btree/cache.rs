@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::{Error, Node};
 use crate::pagestore::TablePageStore;
@@ -45,6 +45,7 @@ impl<S: TablePageStore> NodeCache<S> {
     }
 }
 
+#[derive(Debug)]
 struct DataWrapper {
     data: Vec<u8>,
     was_mutated: bool,
@@ -66,9 +67,13 @@ impl DataWrapper {
     }
 }
 
+#[derive(Debug)]
 pub struct DataCache<S: TablePageStore> {
     cache: HashMap<usize, DataWrapper>,
     store: S,
+
+    // the allocated, but not inserted page ids
+    allocated: HashSet<usize>,
 }
 
 impl<S: TablePageStore> DataCache<S> {
@@ -76,15 +81,20 @@ impl<S: TablePageStore> DataCache<S> {
         DataCache {
             cache: HashMap::new(),
             store,
+            allocated: HashSet::new(),
         }
     }
 
-    pub(crate) fn put_new(&mut self, data: Vec<u8>) -> Result<usize, Error> {
-        let data_id = self.store.allocate()?;
+    pub(crate) fn allocate(&mut self) -> Result<usize, Error> {
+        let page_id = self.store.allocate()?;
+        self.allocated.insert(page_id);
+        Ok(page_id)
+    }
 
-        self.cache.insert(data_id, DataWrapper::new_mutated(data));
-
-        Ok(data_id)
+    pub(crate) fn put(&mut self, page_id: usize, data: Vec<u8>) -> Result<(), Error> {
+        self.allocated.remove(&page_id);
+        self.cache.insert(page_id, DataWrapper::new_mutated(data));
+        Ok(())
     }
 
     pub(crate) fn page_size(&self) -> usize {

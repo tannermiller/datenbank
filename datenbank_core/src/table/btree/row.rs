@@ -79,21 +79,65 @@ impl Row {
                 Column::VarChar(s) => {
                     let bs = s.into_bytes();
                     let (inline, next_page) = if bs.len() > MAX_INLINE_VAR_LEN_COL_SIZE {
-                        let inline = String::from_utf8(&bs[..MAX_INLINE_VAR_LEN_COL_SIZE].to_vec())
-                            .map_err(|e| Error::InvalidColumn(e.to_string()))?;
+                        let inline = bs[..MAX_INLINE_VAR_LEN_COL_SIZE].to_vec();
 
-                        let data_pages = &bs[MAX_INLINE_VAR_LEN_COL_SIZE..]
-                            .chunks(data_cache.page_size() - 8)
-                            .map(|b| b.to_vec())
+                        // chunk out the remaining and assign page ids to them, see the below
+                        // comment for description of the 5 byte header.
+                        let data_pages = bs[MAX_INLINE_VAR_LEN_COL_SIZE..]
+                            .chunks(data_cache.page_size() - 5)
+                            .map(|b| {
+                                let b = b.to_vec();
+                                let page_id = data_cache.allocate()?;
+                                Ok((page_id, b))
+                            })
+                            .collect::<Result<Vec<(usize, Vec<u8>)>, Error>>()?;
+
+                        let (next_page, _) = data_pages[0];
+
+                        // shift the page_ids forward one so that each page is paired with the next
+                        // page's id
+                        let mut next_page_ids: Vec<Option<usize>> = data_pages
+                            .iter()
+                            .skip(1)
+                            .map(|(pd_id, _)| Some(*pd_id))
                             .collect();
+                        next_page_ids.push(None);
 
-                        // TODO: Need to separately allocate pages for each of those and then use
-                        // those page_ids to write each one with the pointer to the next
+                        // each data page has the following format:
+                        //   * 1 byte indicating whether this is the final page in this value (0)
+                        //     or that it is a middle page
+                        //   * 4 bytes that hold a u32 which are either the length of the final
+                        //   part of the value (when the type byte is 0), or the page id of the
+                        //   next page in this value (when the type byte is 1).
+                        //   * The remaining of the page data follows that 5 byte header.
+                        for ((page_id, page), next_page_id) in
+                            data_pages.into_iter().zip(next_page_ids)
+                        {
+                            let mut page_to_write = Vec::with_capacity(page.len() + 5);
+                            match next_page_id {
+                                Some(page_id) => {
+                                    page_to_write.push(1);
+                                    page_to_write
+                                        .write_all(&(page_id as u32).to_be_bytes())
+                                        .expect("can't fail writing to vec");
+                                }
+                                None => {
+                                    page_to_write.push(0);
+                                    page_to_write
+                                        .write_all(&(page.len() as u32).to_be_bytes())
+                                        .expect("can't fail writing to vec");
+                                }
+                            }
 
-                        todo!()
+                            page_to_write.extend(page);
+                            data_cache.put(page_id, page_to_write)?;
+                        }
+
+                        (inline, Some(next_page))
                     } else {
                         (bs, None)
                     };
+
                     let inline = String::from_utf8(inline)
                         .map_err(|e| Error::InvalidColumn(e.to_string()))?;
                     Ok(RowCol::VarChar(RowVarChar { inline, next_page }))
@@ -118,6 +162,7 @@ impl Row {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::pagestore::Memory;
     use crate::schema::ColumnType;
 
     #[test]
@@ -137,8 +182,15 @@ mod test {
 
     #[test]
     fn test_row_from_columns() {
-        fn check(schema: Schema, cols: Vec<Column>, expected_result: bool) {
-            assert_eq!(expected_result, Row::from_columns(schema, cols).is_some());
+        fn check(schema: Schema, cols: Vec<Column>, expected: Option<Row>) {
+            let mut data_cache = DataCache::new(Memory::new(64 * 1024));
+            let result = Row::from_columns(schema, &mut data_cache, cols);
+            match (result, expected) {
+                (Ok(cols), Some(exp)) => assert_eq!(exp, cols),
+                (Err(_), None) => (),
+                (Ok(_), None) => panic!("shouldn't have passed"),
+                (Err(err), Some(_)) => panic!("should't have errored: {}", err),
+            }
         }
 
         let schema = Schema::new(vec![
@@ -152,33 +204,41 @@ mod test {
             Column::Bool(true),
             Column::VarChar("0123456789".to_string()),
         ];
-        check(schema, cols.clone(), true);
+        check(
+            schema.clone(),
+            cols.clone(),
+            Some(Row {
+                schema,
+                body: RefCell::new(RowBody::Unpacked(vec![
+                    RowCol::Int(7),
+                    RowCol::Bool(true),
+                    RowCol::VarChar(RowVarChar {
+                        inline: "0123456789".to_string(),
+                        next_page: None,
+                    }),
+                ])),
+            }),
+        );
 
-        // wrong order
-        let schema = Schema::new(vec![
-            ("bar".into(), ColumnType::Bool),
-            ("foo".into(), ColumnType::Int),
-            ("qux".into(), ColumnType::VarChar(10)),
-        ])
-        .unwrap();
-        check(schema, cols.clone(), false);
-
-        // extra col
-        let schema = Schema::new(vec![
-            ("foo".into(), ColumnType::Int),
-            ("bar".into(), ColumnType::Bool),
-        ])
-        .unwrap();
-        check(schema, cols.clone(), false);
-
-        // missing col
-        let schema = Schema::new(vec![
-            ("foo".into(), ColumnType::Int),
-            ("bar".into(), ColumnType::Bool),
-            ("qux".into(), ColumnType::VarChar(10)),
-        ])
-        .unwrap();
-        let missing_cols = vec![Column::Int(7), Column::Bool(true)];
-        check(schema, missing_cols, false);
+        let cols = vec![
+            Column::Int(7),
+            Column::Bool(true),
+            Column::VarChar("TODO: repeat me to test paging of big varchar values".to_string()),
+        ];
+        check(
+            schema.clone(),
+            cols.clone(),
+            Some(Row {
+                schema,
+                body: RefCell::new(RowBody::Unpacked(vec![
+                    RowCol::Int(7),
+                    RowCol::Bool(true),
+                    RowCol::VarChar(RowVarChar {
+                        inline: "0123456789".to_string(),
+                        next_page: None,
+                    }),
+                ])),
+            }),
+        );
     }
 }

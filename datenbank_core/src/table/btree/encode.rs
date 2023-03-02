@@ -47,23 +47,27 @@ mod test {
 
     #[test]
     fn test_encode() {
+        let store = Memory::new(64 * 1024);
         let empty_tree = BTree {
             name: "something".to_string(),
             schema: Schema::new(vec![]).unwrap(),
             order: 1000,
             root: None,
             node_cache: HashMap::new(),
-            store: Memory::new(64 * 1024),
+            data_cache: DataCache::new(store.clone()),
+            store,
         };
         assert_eq!(vec![0, 0, 3, 232, 0, 0, 0, 0], encode(&empty_tree));
 
+        let store = Memory::new(64 * 1024);
         let filled_tree = BTree {
             name: "something".to_string(),
             schema: Schema::new(vec![]).unwrap(),
             order: 1000,
             root: Some(7),
             node_cache: HashMap::new(),
-            store: Memory::new(64 * 1024),
+            data_cache: DataCache::new(store.clone()),
+            store,
         };
         let encoded = encode(&filled_tree);
         assert_eq!(&vec![0, 0, 3, 232, 0, 0, 0, 7], &encoded);
