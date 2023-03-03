@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use std::io::Write;
 
-use super::cache::DataCache;
 use super::Error;
 use crate::pagestore::TablePageStore;
 use crate::schema::{size_of_packed_cols, Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
+use cache::store::DataCache;
 
 // TODO: This needs to be in terms of RowCol
 fn pack_row_data(cols: Vec<Column>) -> Vec<u8> {
@@ -66,90 +66,6 @@ pub(crate) struct RowVarChar {
 }
 
 impl Row {
-    pub(crate) fn from_columns<S: TablePageStore>(
-        schema: Schema,
-        data_cache: &mut DataCache<S>,
-        cols: Vec<Column>,
-    ) -> Result<Self, Error> {
-        let row_cols = cols
-            .into_iter()
-            .map(|col| match col {
-                Column::Int(i) => Ok(RowCol::Int(i)),
-                Column::Bool(b) => Ok(RowCol::Bool(b)),
-                Column::VarChar(s) => {
-                    let bs = s.into_bytes();
-                    let (inline, next_page) = if bs.len() > MAX_INLINE_VAR_LEN_COL_SIZE {
-                        let inline = bs[..MAX_INLINE_VAR_LEN_COL_SIZE].to_vec();
-
-                        // chunk out the remaining and assign page ids to them, see the below
-                        // comment for description of the 5 byte header.
-                        let data_pages = bs[MAX_INLINE_VAR_LEN_COL_SIZE..]
-                            .chunks(data_cache.page_size() - 5)
-                            .map(|b| {
-                                let b = b.to_vec();
-                                let page_id = data_cache.allocate()?;
-                                Ok((page_id, b))
-                            })
-                            .collect::<Result<Vec<(usize, Vec<u8>)>, Error>>()?;
-
-                        let (next_page, _) = data_pages[0];
-
-                        // shift the page_ids forward one so that each page is paired with the next
-                        // page's id
-                        let mut next_page_ids: Vec<Option<usize>> = data_pages
-                            .iter()
-                            .skip(1)
-                            .map(|(pd_id, _)| Some(*pd_id))
-                            .collect();
-                        next_page_ids.push(None);
-
-                        // each data page has the following format:
-                        //   * 1 byte indicating whether this is the final page in this value (0)
-                        //     or that it is a middle page
-                        //   * 4 bytes that hold a u32 which are either the length of the final
-                        //   part of the value (when the type byte is 0), or the page id of the
-                        //   next page in this value (when the type byte is 1).
-                        //   * The remaining of the page data follows that 5 byte header.
-                        for ((page_id, page), next_page_id) in
-                            data_pages.into_iter().zip(next_page_ids)
-                        {
-                            let mut page_to_write = Vec::with_capacity(page.len() + 5);
-                            match next_page_id {
-                                Some(page_id) => {
-                                    page_to_write.push(1);
-                                    page_to_write
-                                        .write_all(&(page_id as u32).to_be_bytes())
-                                        .expect("can't fail writing to vec");
-                                }
-                                None => {
-                                    page_to_write.push(0);
-                                    page_to_write
-                                        .write_all(&(page.len() as u32).to_be_bytes())
-                                        .expect("can't fail writing to vec");
-                                }
-                            }
-
-                            page_to_write.extend(page);
-                            data_cache.put(page_id, page_to_write)?;
-                        }
-
-                        (inline, Some(next_page))
-                    } else {
-                        (bs, None)
-                    };
-
-                    let inline = String::from_utf8(inline)
-                        .map_err(|e| Error::InvalidColumn(e.to_string()))?;
-                    Ok(RowCol::VarChar(RowVarChar { inline, next_page }))
-                }
-            })
-            .collect::<Result<Vec<RowCol>, Error>>()?;
-
-        let body = RefCell::new(RowBody::Unpacked(row_cols));
-
-        Ok(Row { schema, body })
-    }
-
     pub(crate) fn encode(&self) -> Vec<u8> {
         // TODO: so the problem here is that we need to split out the overflowed varchars and
         // return those up. But where do we actually handle storing those as we need to know their
@@ -157,6 +73,111 @@ impl Row {
 
         todo!()
     }
+}
+
+pub(crate) struct ProcessedRow {
+    schema: Schema,
+    columns: Vec<(RowCol, Option<Vec<Vec<u8>>>)>,
+}
+
+impl ProcessedRow {
+    pub(crate) fn allocate_and_store_pages<S: TablePageStore>(
+        self,
+        cache: &mut DataCache<S>,
+    ) -> Result<Row, Error> {
+        // shift the page_ids forward one so that each page is paired with the next
+        // page's id
+        let mut next_page_ids: Vec<Option<usize>> = data_pages
+            .iter()
+            .skip(1)
+            .map(|(pd_id, _)| Some(*pd_id))
+            .collect();
+        next_page_ids.push(None);
+        todo!()
+    }
+}
+
+pub(crate) fn process_columns(
+    schema: Schema,
+    page_size: usize,
+    cols: Vec<Column>,
+) -> Result<ProcessedRow, Error> {
+    let row_cols = cols
+        .into_iter()
+        .map(|col| match col {
+            Column::Int(i) => Ok(RowCol::Int(i)),
+            Column::Bool(b) => Ok(RowCol::Bool(b)),
+            Column::VarChar(s) => {
+                let bs = s.into_bytes();
+                let (inline, next_page) = if bs.len() > MAX_INLINE_VAR_LEN_COL_SIZE {
+                    let inline = bs[..MAX_INLINE_VAR_LEN_COL_SIZE].to_vec();
+
+                    // chunk out the remaining and assign page ids to them, see the below
+                    // comment for description of the 5 byte header.
+                    let data_pages = bs[MAX_INLINE_VAR_LEN_COL_SIZE..]
+                        .chunks(page_size - 5)
+                        .map(|b| {
+                            let b = b.to_vec();
+                            let page_id = data_cache.allocate()?;
+                            Ok((page_id, b))
+                        })
+                        .collect::<Result<Vec<(usize, Vec<u8>)>, Error>>()?;
+
+                    let (next_page, _) = data_pages[0];
+
+                    // shift the page_ids forward one so that each page is paired with the next
+                    // page's id
+                    let mut next_page_ids: Vec<Option<usize>> = data_pages
+                        .iter()
+                        .skip(1)
+                        .map(|(pd_id, _)| Some(*pd_id))
+                        .collect();
+                    next_page_ids.push(None);
+
+                    // each data page has the following format:
+                    //   * 1 byte indicating whether this is the final page in this value (0)
+                    //     or that it is a middle page
+                    //   * 4 bytes that hold a u32 which are either the length of the final
+                    //   part of the value (when the type byte is 0), or the page id of the
+                    //   next page in this value (when the type byte is 1).
+                    //   * The remaining of the page data follows that 5 byte header.
+                    for ((page_id, page), next_page_id) in data_pages.into_iter().zip(next_page_ids)
+                    {
+                        let mut page_to_write = Vec::with_capacity(page.len() + 5);
+                        match next_page_id {
+                            Some(page_id) => {
+                                page_to_write.push(1);
+                                page_to_write
+                                    .write_all(&(page_id as u32).to_be_bytes())
+                                    .expect("can't fail writing to vec");
+                            }
+                            None => {
+                                page_to_write.push(0);
+                                page_to_write
+                                    .write_all(&(page.len() as u32).to_be_bytes())
+                                    .expect("can't fail writing to vec");
+                            }
+                        }
+
+                        page_to_write.extend(page);
+                        data_cache.put(page_id, page_to_write)?;
+                    }
+
+                    (inline, Some(next_page))
+                } else {
+                    (bs, None)
+                };
+
+                let inline =
+                    String::from_utf8(inline).map_err(|e| Error::InvalidColumn(e.to_string()))?;
+                Ok(RowCol::VarChar(RowVarChar { inline, next_page }))
+            }
+        })
+        .collect::<Result<Vec<RowCol>, Error>>()?;
+
+    let body = RefCell::new(RowBody::Unpacked(row_cols));
+
+    Ok(Row { schema, body })
 }
 
 #[cfg(test)]
@@ -181,10 +202,10 @@ mod test {
     }
 
     #[test]
-    fn test_row_from_columns() {
+    fn test_process_columns() {
         fn check(schema: Schema, cols: Vec<Column>, expected: Option<Row>) {
             let mut data_cache = DataCache::new(Memory::new(64 * 1024));
-            let result = Row::from_columns(schema, &mut data_cache, cols);
+            let result = Row::process_columns(schema, &mut data_cache, cols);
             match (result, expected) {
                 (Ok(cols), Some(exp)) => assert_eq!(exp, cols),
                 (Err(_), None) => (),
