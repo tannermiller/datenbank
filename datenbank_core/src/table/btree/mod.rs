@@ -4,7 +4,6 @@ use crate::pagestore::{Error as PageError, TablePageStore};
 use crate::schema::{Column, Schema};
 use cache::DataCache;
 use node::Node;
-use row::Row;
 
 pub mod cache;
 mod encode;
@@ -71,8 +70,10 @@ impl<S: TablePageStore> BTree<S> {
         }
 
         for value in values {
-            let row = Row::from_columns(self.schema.clone(), &mut self.data_cache, value);
-            // TODO: convert to row::Row and do the allocation of outside pages as part of it
+            let row =
+                row::process_columns(self.schema.clone(), self.store.usable_page_size(), value)?
+                    .finalize(&mut self.data_cache)?;
+            // TODO: do something with the row
         }
 
         todo!()

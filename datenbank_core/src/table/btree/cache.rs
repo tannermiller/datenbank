@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::{Error, Node};
-use crate::pagestore::TablePageStore;
+use crate::pagestore::{Error as PageError, TablePageStore};
 
 struct NodeWrapper {
     node: Node,
@@ -95,6 +95,14 @@ impl<S: TablePageStore> DataCache<S> {
         self.allocated.remove(&page_id);
         self.cache.insert(page_id, DataWrapper::new_mutated(data));
         Ok(())
+    }
+
+    pub(crate) fn get(&mut self, page_id: usize) -> Result<Vec<u8>, Error> {
+        let page = self.cache.get(&page_id);
+        match page {
+            Some(v) => Ok(v.data.clone()),
+            None => Err(Error::Io(PageError::UnallocatedPage(page_id))),
+        }
     }
 
     pub(crate) fn page_size(&self) -> usize {

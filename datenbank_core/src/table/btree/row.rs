@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use std::io::Write;
 
+use super::cache::DataCache;
 use super::Error;
 use crate::pagestore::TablePageStore;
 use crate::schema::{size_of_packed_cols, Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
-use cache::store::DataCache;
 
 // TODO: This needs to be in terms of RowCol
 fn pack_row_data(cols: Vec<Column>) -> Vec<u8> {
@@ -75,20 +75,26 @@ impl Row {
     }
 }
 
+// ProcessedRow represents a row that has been split in order to fit into a Row, but may yet
+// require some of the overflow data from variable length rows to be allocated and stored
+// separately.
+#[derive(Debug, PartialEq)]
 pub(crate) struct ProcessedRow {
     schema: Schema,
     columns: Vec<(RowCol, Option<Vec<Vec<u8>>>)>,
 }
 
 impl ProcessedRow {
-    pub(crate) fn allocate_and_store_pages<S: TablePageStore>(
+    // Finalize the row by allocating and storing any overflow data pages from variable length
+    // columns.
+    pub(crate) fn finalize<S: TablePageStore>(
         self,
         cache: &mut DataCache<S>,
     ) -> Result<Row, Error> {
         let ProcessedRow { schema, columns } = self;
 
         let mut result_rows = Vec::with_capacity(columns.len());
-        for (row, data_pages) in columns {
+        for (mut row, data_pages) in columns {
             let data_pages = match data_pages {
                 Some(data_pages) => data_pages,
                 None => {
@@ -97,16 +103,17 @@ impl ProcessedRow {
                 }
             };
 
-            let page_ids = (0..data_pages.len()).map(|_| cache.allocate()).collect()?;
+            let page_ids = (0..data_pages.len())
+                .map(|_| cache.allocate())
+                .collect::<Result<Vec<usize>, Error>>()?;
             let first_next_page = page_ids[0];
-            let mut next_page_ids: Vec<Option<usize>> = page_ids
-                .into_iter()
-                .skip(1)
-                .map(|pg_id| Some(*pg_id))
-                .collect();
+            let mut next_page_ids: Vec<Option<usize>> =
+                page_ids.iter().skip(1).map(|pg_id| Some(*pg_id)).collect();
             next_page_ids.push(None);
 
-            for ((page_id, page), next_page_id) in data_pages.into_iter().zip(next_page_ids) {
+            for ((page, page_id), next_page_id) in
+                data_pages.into_iter().zip(page_ids).zip(next_page_ids)
+            {
                 let mut page_to_write = Vec::with_capacity(page.len() + 5);
                 match next_page_id {
                     Some(page_id) => {
@@ -127,7 +134,15 @@ impl ProcessedRow {
                 cache.put(page_id, page_to_write)?;
             }
 
-            todo!()
+            // VarChar is our only variable length value so this is fine for now
+            match row {
+                RowCol::VarChar(ref mut rvc) => {
+                    rvc.next_page = Some(first_next_page);
+                }
+                _ => unreachable!(),
+            }
+
+            result_rows.push(row);
         }
 
         Ok(Row {
@@ -142,14 +157,14 @@ pub(crate) fn process_columns(
     page_size: usize,
     cols: Vec<Column>,
 ) -> Result<ProcessedRow, Error> {
-    let row_cols = cols
+    let columns = cols
         .into_iter()
         .map(|col| match col {
-            Column::Int(i) => Ok(RowCol::Int(i)),
-            Column::Bool(b) => Ok(RowCol::Bool(b)),
+            Column::Int(i) => Ok((RowCol::Int(i), None)),
+            Column::Bool(b) => Ok((RowCol::Bool(b), None)),
             Column::VarChar(s) => {
                 let bs = s.into_bytes();
-                let (inline, next_page) = if bs.len() > MAX_INLINE_VAR_LEN_COL_SIZE {
+                let (inline, data_pages) = if bs.len() > MAX_INLINE_VAR_LEN_COL_SIZE {
                     let inline = bs[..MAX_INLINE_VAR_LEN_COL_SIZE].to_vec();
 
                     // chunk out the remaining and assign page ids to them, see the below
@@ -157,63 +172,27 @@ pub(crate) fn process_columns(
                     let data_pages: Vec<Vec<u8>> = bs[MAX_INLINE_VAR_LEN_COL_SIZE..]
                         .chunks(page_size - 5)
                         .map(|b| b.to_vec())
-                        .collect()?;
+                        .collect();
 
-                    //let (next_page, _) = data_pages[0];
-
-                    // shift the page_ids forward one so that each page is paired with the next
-                    // page's id
-                    //let mut next_page_ids: Vec<Option<usize>> = data_pages
-                    //    .iter()
-                    //    .skip(1)
-                    //    .map(|(pd_id, _)| Some(*pd_id))
-                    //    .collect();
-                    //next_page_ids.push(None);
-
-                    // each data page has the following format:
-                    //   * 1 byte indicating whether this is the final page in this value (0)
-                    //     or that it is a middle page
-                    //   * 4 bytes that hold a u32 which are either the length of the final
-                    //   part of the value (when the type byte is 0), or the page id of the
-                    //   next page in this value (when the type byte is 1).
-                    //   * The remaining of the page data follows that 5 byte header.
-                    for ((page_id, page), next_page_id) in data_pages.into_iter().zip(next_page_ids)
-                    {
-                        let mut page_to_write = Vec::with_capacity(page.len() + 5);
-                        match next_page_id {
-                            Some(page_id) => {
-                                page_to_write.push(1);
-                                page_to_write
-                                    .write_all(&(page_id as u32).to_be_bytes())
-                                    .expect("can't fail writing to vec");
-                            }
-                            None => {
-                                page_to_write.push(0);
-                                page_to_write
-                                    .write_all(&(page.len() as u32).to_be_bytes())
-                                    .expect("can't fail writing to vec");
-                            }
-                        }
-
-                        page_to_write.extend(page);
-                        data_cache.put(page_id, page_to_write)?;
-                    }
-
-                    (inline, Some(next_page))
+                    (inline, Some(data_pages))
                 } else {
                     (bs, None)
                 };
 
                 let inline =
                     String::from_utf8(inline).map_err(|e| Error::InvalidColumn(e.to_string()))?;
-                Ok(RowCol::VarChar(RowVarChar { inline, next_page }))
+                Ok((
+                    RowCol::VarChar(RowVarChar {
+                        inline,
+                        next_page: None,
+                    }),
+                    data_pages,
+                ))
             }
         })
-        .collect::<Result<Vec<RowCol>, Error>>()?;
+        .collect::<Result<Vec<(RowCol, Option<Vec<Vec<u8>>>)>, Error>>()?;
 
-    let body = RefCell::new(RowBody::Unpacked(row_cols));
-
-    Ok(Row { schema, body })
+    Ok(ProcessedRow { schema, columns })
 }
 
 #[cfg(test)]
@@ -239,9 +218,13 @@ mod test {
 
     #[test]
     fn test_process_columns() {
-        fn check(schema: Schema, cols: Vec<Column>, expected: Option<Row>) {
-            let mut data_cache = DataCache::new(Memory::new(64 * 1024));
-            let result = Row::process_columns(schema, &mut data_cache, cols);
+        fn check(
+            schema: Schema,
+            page_size: usize,
+            cols: Vec<Column>,
+            expected: Option<ProcessedRow>,
+        ) {
+            let result = process_columns(schema, page_size, cols);
             match (result, expected) {
                 (Ok(cols), Some(exp)) => assert_eq!(exp, cols),
                 (Err(_), None) => (),
@@ -263,39 +246,111 @@ mod test {
         ];
         check(
             schema.clone(),
+            64,
             cols.clone(),
-            Some(Row {
-                schema,
-                body: RefCell::new(RowBody::Unpacked(vec![
-                    RowCol::Int(7),
-                    RowCol::Bool(true),
-                    RowCol::VarChar(RowVarChar {
-                        inline: "0123456789".to_string(),
-                        next_page: None,
-                    }),
-                ])),
+            Some(ProcessedRow {
+                schema: schema.clone(),
+                columns: vec![
+                    (RowCol::Int(7), None),
+                    (RowCol::Bool(true), None),
+                    (
+                        RowCol::VarChar(RowVarChar {
+                            inline: "0123456789".to_string(),
+                            next_page: None,
+                        }),
+                        None,
+                    ),
+                ],
             }),
         );
 
+        let base_str = "1".repeat(MAX_INLINE_VAR_LEN_COL_SIZE);
+        let mut var_char_value = base_str.clone();
+        var_char_value.extend("0123456789".chars());
         let cols = vec![
             Column::Int(7),
             Column::Bool(true),
-            Column::VarChar("TODO: repeat me to test paging of big varchar values".to_string()),
+            Column::VarChar(var_char_value),
         ];
         check(
             schema.clone(),
+            8, // absurdly low to verify paging is correct
             cols.clone(),
-            Some(Row {
+            Some(ProcessedRow {
+                schema,
+                columns: vec![
+                    (RowCol::Int(7), None),
+                    (RowCol::Bool(true), None),
+                    (
+                        RowCol::VarChar(RowVarChar {
+                            inline: base_str,
+                            next_page: None,
+                        }),
+                        Some(vec![
+                            "012".as_bytes().to_vec(),
+                            "345".as_bytes().to_vec(),
+                            "678".as_bytes().to_vec(),
+                            "9".as_bytes().to_vec(),
+                        ]),
+                    ),
+                ],
+            }),
+        );
+    }
+
+    #[test]
+    fn test_processed_rows_finalize() {
+        let mut store = Memory::new(64);
+        let mut data_cache = DataCache::new(store.clone());
+        let schema = Schema::new(vec![
+            ("foo".into(), ColumnType::Int),
+            ("bar".into(), ColumnType::Bool),
+            ("qux".into(), ColumnType::VarChar(10)),
+        ])
+        .unwrap();
+        let base_str = "1".repeat(MAX_INLINE_VAR_LEN_COL_SIZE);
+        let pr = ProcessedRow {
+            schema: schema.clone(),
+            columns: vec![
+                (RowCol::Int(7), None),
+                (RowCol::Bool(true), None),
+                (
+                    RowCol::VarChar(RowVarChar {
+                        inline: base_str.clone(),
+                        next_page: None,
+                    }),
+                    Some(vec![
+                        "012".as_bytes().to_vec(),
+                        "345".as_bytes().to_vec(),
+                        "678".as_bytes().to_vec(),
+                        "9".as_bytes().to_vec(),
+                    ]),
+                ),
+            ],
+        };
+
+        let row = pr.finalize(&mut data_cache).unwrap();
+
+        assert_eq!(
+            Row {
                 schema,
                 body: RefCell::new(RowBody::Unpacked(vec![
                     RowCol::Int(7),
                     RowCol::Bool(true),
                     RowCol::VarChar(RowVarChar {
-                        inline: "0123456789".to_string(),
-                        next_page: None,
+                        inline: base_str,
+                        next_page: Some(1),
                     }),
                 ])),
-            }),
+            },
+            row
         );
+
+        // ensure that the 4 pages were allocated by seeing the next allocated one is 5
+        assert_eq!(5, store.allocate().unwrap());
+        assert_eq!(vec![1, 0, 0, 0, 2, 48, 49, 50], data_cache.get(1).unwrap());
+        assert_eq!(vec![1, 0, 0, 0, 3, 51, 52, 53], data_cache.get(2).unwrap());
+        assert_eq!(vec![1, 0, 0, 0, 4, 54, 55, 56], data_cache.get(3).unwrap());
+        assert_eq!(vec![0, 0, 0, 0, 1, 57], data_cache.get(4).unwrap());
     }
 }
