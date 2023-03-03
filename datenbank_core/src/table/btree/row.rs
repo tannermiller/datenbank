@@ -85,15 +85,55 @@ impl ProcessedRow {
         self,
         cache: &mut DataCache<S>,
     ) -> Result<Row, Error> {
-        // shift the page_ids forward one so that each page is paired with the next
-        // page's id
-        let mut next_page_ids: Vec<Option<usize>> = data_pages
-            .iter()
-            .skip(1)
-            .map(|(pd_id, _)| Some(*pd_id))
-            .collect();
-        next_page_ids.push(None);
-        todo!()
+        let ProcessedRow { schema, columns } = self;
+
+        let mut result_rows = Vec::with_capacity(columns.len());
+        for (row, data_pages) in columns {
+            let data_pages = match data_pages {
+                Some(data_pages) => data_pages,
+                None => {
+                    result_rows.push(row);
+                    continue;
+                }
+            };
+
+            let page_ids = (0..data_pages.len()).map(|_| cache.allocate()).collect()?;
+            let first_next_page = page_ids[0];
+            let mut next_page_ids: Vec<Option<usize>> = page_ids
+                .into_iter()
+                .skip(1)
+                .map(|pg_id| Some(*pg_id))
+                .collect();
+            next_page_ids.push(None);
+
+            for ((page_id, page), next_page_id) in data_pages.into_iter().zip(next_page_ids) {
+                let mut page_to_write = Vec::with_capacity(page.len() + 5);
+                match next_page_id {
+                    Some(page_id) => {
+                        page_to_write.push(1);
+                        page_to_write
+                            .write_all(&(page_id as u32).to_be_bytes())
+                            .expect("can't fail writing to vec");
+                    }
+                    None => {
+                        page_to_write.push(0);
+                        page_to_write
+                            .write_all(&(page.len() as u32).to_be_bytes())
+                            .expect("can't fail writing to vec");
+                    }
+                }
+
+                page_to_write.extend(page);
+                cache.put(page_id, page_to_write)?;
+            }
+
+            todo!()
+        }
+
+        Ok(Row {
+            schema,
+            body: RefCell::new(RowBody::Unpacked(result_rows)),
+        })
     }
 }
 
@@ -114,25 +154,21 @@ pub(crate) fn process_columns(
 
                     // chunk out the remaining and assign page ids to them, see the below
                     // comment for description of the 5 byte header.
-                    let data_pages = bs[MAX_INLINE_VAR_LEN_COL_SIZE..]
+                    let data_pages: Vec<Vec<u8>> = bs[MAX_INLINE_VAR_LEN_COL_SIZE..]
                         .chunks(page_size - 5)
-                        .map(|b| {
-                            let b = b.to_vec();
-                            let page_id = data_cache.allocate()?;
-                            Ok((page_id, b))
-                        })
-                        .collect::<Result<Vec<(usize, Vec<u8>)>, Error>>()?;
+                        .map(|b| b.to_vec())
+                        .collect()?;
 
-                    let (next_page, _) = data_pages[0];
+                    //let (next_page, _) = data_pages[0];
 
                     // shift the page_ids forward one so that each page is paired with the next
                     // page's id
-                    let mut next_page_ids: Vec<Option<usize>> = data_pages
-                        .iter()
-                        .skip(1)
-                        .map(|(pd_id, _)| Some(*pd_id))
-                        .collect();
-                    next_page_ids.push(None);
+                    //let mut next_page_ids: Vec<Option<usize>> = data_pages
+                    //    .iter()
+                    //    .skip(1)
+                    //    .map(|(pd_id, _)| Some(*pd_id))
+                    //    .collect();
+                    //next_page_ids.push(None);
 
                     // each data page has the following format:
                     //   * 1 byte indicating whether this is the final page in this value (0)
