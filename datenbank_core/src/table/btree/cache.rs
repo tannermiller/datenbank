@@ -1,66 +1,31 @@
+use std::collections::hash_map;
 use std::collections::{HashMap, HashSet};
+use std::mem;
 
-use super::{Error, Node};
+use super::Error;
 use crate::pagestore::{Error as PageError, TablePageStore};
 
-struct NodeWrapper {
-    node: Node,
-    was_mutated: bool,
-}
-
-impl NodeWrapper {
-    fn new(node: Node) -> Self {
-        NodeWrapper {
-            node,
-            was_mutated: false,
-        }
-    }
-}
-
-pub struct NodeCache<S: TablePageStore> {
-    cache: HashMap<usize, NodeWrapper>,
-    store: S,
-}
-
-impl<S: TablePageStore> NodeCache<S> {
-    pub(crate) fn new(store: S) -> Self {
-        NodeCache {
-            cache: HashMap::new(),
-            store,
-        }
-    }
-
-    pub(crate) fn get_mut(&mut self, node_id: usize) -> Result<Option<&mut Node>, Error> {
-        if let Some(wrapper) = self.cache.get_mut(&node_id) {
-            wrapper.was_mutated = true;
-            return Ok(Some(&mut wrapper.node));
-        }
-
-        let node = self.store.get(node_id)?;
-
-        // TODO: need to deserialize node & node body
-        //self.cache.insert(node_id, NodeWrapper::new(node));
-
-        todo!()
-    }
+pub trait Page: std::fmt::Debug + Clone {
+    fn encode(&self) -> Vec<u8>;
+    fn decode(data: &[u8]) -> Result<Self, Error>;
 }
 
 #[derive(Debug)]
-struct DataWrapper {
-    data: Vec<u8>,
+struct Wrapper<P: Page> {
+    data: P,
     was_mutated: bool,
 }
 
-impl DataWrapper {
-    fn new(data: Vec<u8>) -> Self {
-        DataWrapper {
+impl<P: Page> Wrapper<P> {
+    fn new(data: P) -> Self {
+        Wrapper {
             data,
             was_mutated: false,
         }
     }
 
-    fn new_mutated(data: Vec<u8>) -> Self {
-        DataWrapper {
+    fn new_mutated(data: P) -> Self {
+        Wrapper {
             data,
             was_mutated: true,
         }
@@ -68,21 +33,35 @@ impl DataWrapper {
 }
 
 #[derive(Debug)]
-pub struct DataCache<S: TablePageStore> {
-    cache: HashMap<usize, DataWrapper>,
+pub struct Cache<S: TablePageStore, P: Page> {
+    cache: HashMap<usize, Wrapper<P>>,
     store: S,
 
     // the allocated, but not inserted page ids
     allocated: HashSet<usize>,
 }
 
-impl<S: TablePageStore> DataCache<S> {
+impl<S: TablePageStore, P: Page> Cache<S, P> {
     pub(crate) fn new(store: S) -> Self {
-        DataCache {
+        Cache {
             cache: HashMap::new(),
             store,
             allocated: HashSet::new(),
         }
+    }
+
+    pub(crate) fn get_mut(&mut self, page_id: usize) -> Result<&mut P, Error> {
+        if let hash_map::Entry::Vacant(e) = self.cache.entry(page_id) {
+            let page_data = self.store.get(page_id)?;
+            let page = P::decode(&page_data)?;
+
+            e.insert(Wrapper::new_mutated(page));
+        };
+
+        self.cache
+            .get_mut(&page_id)
+            .map(|w| &mut w.data)
+            .ok_or(Error::Io(PageError::UnallocatedPage(page_id))) // shouldn't happen
     }
 
     pub(crate) fn allocate(&mut self) -> Result<usize, Error> {
@@ -91,21 +70,50 @@ impl<S: TablePageStore> DataCache<S> {
         Ok(page_id)
     }
 
-    pub(crate) fn put(&mut self, page_id: usize, data: Vec<u8>) -> Result<(), Error> {
+    pub(crate) fn put(&mut self, page_id: usize, data: P) -> Result<(), Error> {
         self.allocated.remove(&page_id);
-        self.cache.insert(page_id, DataWrapper::new_mutated(data));
+        self.cache.insert(page_id, Wrapper::new_mutated(data));
         Ok(())
     }
 
-    pub(crate) fn get(&mut self, page_id: usize) -> Result<Vec<u8>, Error> {
-        let page = self.cache.get(&page_id);
-        match page {
-            Some(v) => Ok(v.data.clone()),
-            None => Err(Error::Io(PageError::UnallocatedPage(page_id))),
-        }
+    pub(crate) fn get(&mut self, page_id: usize) -> Result<&P, Error> {
+        if let hash_map::Entry::Vacant(e) = self.cache.entry(page_id) {
+            let data = self.store.get(page_id)?;
+            let page = P::decode(&data)?;
+            e.insert(Wrapper::new(page));
+        };
+
+        self.cache
+            .get(&page_id)
+            .map(|w| &w.data)
+            .ok_or(Error::Io(PageError::UnallocatedPage(page_id))) // shouldn't happen
     }
 
     pub(crate) fn page_size(&self) -> usize {
         self.store.usable_page_size()
     }
+
+    pub(crate) fn commit(&mut self) -> Result<(), Error> {
+        let old_cache = mem::take(&mut self.cache);
+
+        for (page_id, wrapper) in old_cache {
+            if wrapper.was_mutated {
+                self.store.put(page_id, wrapper.data.encode())?;
+            }
+        }
+
+        Ok(())
+    }
 }
+
+impl Page for Vec<u8> {
+    fn encode(&self) -> Vec<u8> {
+        self.clone()
+    }
+
+    fn decode(data: &[u8]) -> Result<Self, Error> {
+        Ok(data.to_vec())
+    }
+}
+
+// TODO: tests

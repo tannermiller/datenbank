@@ -1,11 +1,12 @@
 use std::io::Write;
 
+use super::cache::Page;
 use super::row::Row;
 use super::Error;
 
 // This represents a single node in the B+ Tree, it contains the metadata of the node as well as
 // the node body itself.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Node {
     // The ID of this node acts as the key we use to store it with.
     id: usize,
@@ -64,7 +65,7 @@ impl Node {
 }
 
 // This represents which type this node is and contains the type-specific data for each one.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum NodeBody {
     // Internal nodes contain the boundary keys (first of each next child) and the pointers to the
     // child nodes. No rows are stored here.
@@ -79,6 +80,16 @@ pub(crate) enum NodeBody {
         // the leaf node to the right of this one, used for table scans
         right_sibling: Option<usize>,
     },
+}
+
+impl Page for Node {
+    fn encode(&self) -> Vec<u8> {
+        todo!()
+    }
+
+    fn decode(data: &[u8]) -> Result<Self, Error> {
+        todo!()
+    }
 }
 
 impl NodeBody {

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::io::Write;
 
-use super::cache::DataCache;
+use super::cache::Cache;
 use super::Error;
 use crate::pagestore::TablePageStore;
 use crate::schema::{size_of_packed_cols, Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
@@ -89,7 +89,7 @@ impl ProcessedRow {
     // columns.
     pub(crate) fn finalize<S: TablePageStore>(
         self,
-        cache: &mut DataCache<S>,
+        cache: &mut Cache<S, Vec<u8>>,
     ) -> Result<Row, Error> {
         let ProcessedRow { schema, columns } = self;
 
@@ -301,7 +301,7 @@ mod test {
     #[test]
     fn test_processed_rows_finalize() {
         let mut store = Memory::new(64);
-        let mut data_cache = DataCache::new(store.clone());
+        let mut data_cache = Cache::new(store.clone());
         let schema = Schema::new(vec![
             ("foo".into(), ColumnType::Int),
             ("bar".into(), ColumnType::Bool),
@@ -348,9 +348,18 @@ mod test {
 
         // ensure that the 4 pages were allocated by seeing the next allocated one is 5
         assert_eq!(5, store.allocate().unwrap());
-        assert_eq!(vec![1, 0, 0, 0, 2, 48, 49, 50], data_cache.get(1).unwrap());
-        assert_eq!(vec![1, 0, 0, 0, 3, 51, 52, 53], data_cache.get(2).unwrap());
-        assert_eq!(vec![1, 0, 0, 0, 4, 54, 55, 56], data_cache.get(3).unwrap());
-        assert_eq!(vec![0, 0, 0, 0, 1, 57], data_cache.get(4).unwrap());
+        assert_eq!(
+            &vec![1u8, 0, 0, 0, 2, 48, 49, 50],
+            data_cache.get(1).unwrap()
+        );
+        assert_eq!(
+            &vec![1u8, 0, 0, 0, 3, 51, 52, 53],
+            data_cache.get(2).unwrap()
+        );
+        assert_eq!(
+            &vec![1u8, 0, 0, 0, 4, 54, 55, 56],
+            data_cache.get(3).unwrap()
+        );
+        assert_eq!(&vec![0u8, 0, 0, 0, 1, 57], data_cache.get(4).unwrap());
     }
 }

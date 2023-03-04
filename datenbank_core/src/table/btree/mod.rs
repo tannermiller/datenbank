@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 use crate::pagestore::{Error as PageError, TablePageStore};
 use crate::schema::{Column, Schema};
-use cache::DataCache;
+use cache::Cache;
 use node::Node;
 
 pub mod cache;
@@ -31,8 +29,8 @@ pub struct BTree<S: TablePageStore> {
     // the order or branching factor of the B+ Tree
     pub(crate) order: usize,
     pub(crate) root: Option<usize>,
-    pub(crate) node_cache: HashMap<usize, Node>,
-    pub(crate) data_cache: DataCache<S>,
+    pub(crate) node_cache: Cache<S, Node>,
+    pub(crate) data_cache: Cache<S, Vec<u8>>,
     pub(crate) store: S,
 }
 
@@ -49,8 +47,8 @@ impl<S: TablePageStore> BTree<S> {
             order,
             schema,
             root: None,
-            node_cache: HashMap::new(),
-            data_cache: DataCache::new(store.clone()),
+            node_cache: Cache::new(store.clone()),
+            data_cache: Cache::new(store.clone()),
             store,
         })
     }
@@ -60,23 +58,37 @@ impl<S: TablePageStore> BTree<S> {
     // be put in order via schema.put_columns_in_order().
     pub fn insert(&mut self, values: Vec<Vec<Column>>) -> Result<usize, Error> {
         // first of all, handle an empty tree.
-        if self.root.is_none() {
-            let root_id = self.store.allocate()?;
-            self.root = Some(root_id);
+        let root_id = match self.root {
+            None => {
+                let root_id = self.store.allocate()?;
+                self.root = Some(root_id);
 
-            let root_node = Node::new_leaf(root_id, self.order);
+                let root_node = Node::new_leaf(root_id, self.order);
 
-            self.node_cache.insert(root_id, root_node);
-        }
+                self.node_cache.put(root_id, root_node);
+                root_id
+            }
+            Some(root_id) => root_id,
+        };
 
+        let root = self.node_cache.get_mut(root_id)?;
+
+        let mut count_affected = 0;
         for value in values {
             let row =
                 row::process_columns(self.schema.clone(), self.store.usable_page_size(), value)?
                     .finalize(&mut self.data_cache)?;
-            // TODO: do something with the row
+
+            let was_inserted = root.insert_row(row)?;
+
+            if was_inserted {
+                count_affected += 1;
+            }
         }
 
-        todo!()
+        // TODO: commit node and data cache
+
+        Ok(count_affected)
     }
 
     // The encoding for a BTree is just:
