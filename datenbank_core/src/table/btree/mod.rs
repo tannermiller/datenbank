@@ -65,7 +65,7 @@ impl<S: TablePageStore> BTree<S> {
 
                 let root_node = Node::new_leaf(root_id, self.order);
 
-                self.node_cache.put(root_id, root_node);
+                self.node_cache.put(root_id, root_node)?;
                 root_id
             }
             Some(root_id) => root_id,
@@ -86,9 +86,14 @@ impl<S: TablePageStore> BTree<S> {
             }
         }
 
-        // TODO: commit node and data cache
+        self.commit()?;
 
         Ok(count_affected)
+    }
+
+    fn commit(&mut self) -> Result<(), Error> {
+        self.node_cache.commit()?;
+        self.data_cache.commit()
     }
 
     // The encoding for a BTree is just:
