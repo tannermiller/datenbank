@@ -102,6 +102,11 @@ impl<S: TablePageStore, P: Page> Cache<S, P> {
             }
         }
 
+        // delete the allocated but unused pages, so that they can be reused
+        for unused_page in mem::take(&mut self.allocated) {
+            self.store.delete(unused_page)?;
+        }
+
         Ok(())
     }
 }
@@ -116,4 +121,39 @@ impl Page for Vec<u8> {
     }
 }
 
-// TODO: tests
+#[cfg(test)]
+mod test {
+    use crate::pagestore::Memory;
+
+    use super::*;
+
+    #[test]
+    fn test_cache() {
+        let store = Memory::new(64 * 1024);
+        let mut cache: Cache<Memory, Vec<u8>> = Cache::new(store.clone());
+
+        assert!(cache.get(1).is_err());
+
+        let first_page = cache.allocate().unwrap();
+        assert_eq!(1, first_page);
+        assert!(cache.allocated.contains(&first_page));
+
+        cache
+            .put(first_page, "Hello, World!".as_bytes().to_vec())
+            .unwrap();
+        assert!(!cache.allocated.contains(&first_page));
+
+        assert_eq!("Hello, World!".as_bytes(), cache.get(first_page).unwrap());
+        assert_eq!(Vec::<u8>::new(), store.get(first_page).unwrap());
+
+        cache.get_mut(first_page).unwrap().push(b'?');
+        assert_eq!("Hello, World!?".as_bytes(), cache.get(first_page).unwrap());
+
+        cache.commit().unwrap();
+
+        assert_eq!(0, cache.cache.len());
+        assert_eq!(0, cache.allocated.len());
+
+        assert_eq!("Hello, World!?".as_bytes(), store.get(first_page).unwrap());
+    }
+}
