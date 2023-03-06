@@ -73,6 +73,12 @@ impl Row {
 
         todo!()
     }
+
+    pub(crate) fn key(&self) -> String {
+        // TODO: extract the row key, this will start with just all the columns, but this will be
+        // more important when I impl primary keys and indexes as it will be different for those.
+        todo!()
+    }
 }
 
 // ProcessedRow represents a row that has been split in order to fit into a Row, but may yet

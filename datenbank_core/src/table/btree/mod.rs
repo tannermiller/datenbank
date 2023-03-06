@@ -1,7 +1,8 @@
 use crate::pagestore::{Error as PageError, TablePageStore};
 use crate::schema::{Column, Schema};
 use cache::Cache;
-use node::Node;
+use node::{Node, NodeBody};
+use row::Row;
 
 pub mod cache;
 mod encode;
@@ -71,24 +72,32 @@ impl<S: TablePageStore> BTree<S> {
             Some(root_id) => root_id,
         };
 
-        let root = self.node_cache.get_mut(root_id)?;
-
         let mut count_affected = 0;
         for value in values {
             let row =
                 row::process_columns(self.schema.clone(), self.store.usable_page_size(), value)?
                     .finalize(&mut self.data_cache)?;
 
-            let was_inserted = root.insert_row(row)?;
+            self.insert_row(root_id, row)?;
 
-            if was_inserted {
-                count_affected += 1;
-            }
+            count_affected += 1;
         }
 
         self.commit()?;
 
         Ok(count_affected)
+    }
+
+    fn insert_row(&mut self, root_id: usize, row: Row) -> Result<(), Error> {
+        let root = self.node_cache.get_mut(root_id)?;
+
+        if let Some(new_child) = root.insert_row(row)?.finalize(&mut self.node_cache)? {
+            // if we get a new_child from this split then we've split the root and need to create a
+            // new root node with the previous root and new child node as children.
+            todo!()
+        }
+
+        Ok(())
     }
 
     fn commit(&mut self) -> Result<(), Error> {

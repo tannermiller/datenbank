@@ -1,18 +1,19 @@
 use std::io::Write;
 
-use super::cache::Page;
+use super::cache::{Cache, Page};
 use super::row::Row;
 use super::Error;
+use crate::pagestore::TablePageStore;
 
 // This represents a single node in the B+ Tree, it contains the metadata of the node as well as
 // the node body itself.
 #[derive(Debug, Clone)]
 pub(crate) struct Node {
     // The ID of this node acts as the key we use to store it with.
-    id: usize,
+    pub(crate) id: usize,
     // the order or branching factor of this B+ Tree
-    order: usize,
-    body: NodeBody,
+    pub(crate) order: usize,
+    pub(crate) body: NodeBody,
 }
 
 impl Node {
@@ -59,8 +60,31 @@ impl Node {
         bytes
     }
 
-    pub fn insert_row(&mut self, row: Row) -> Result<bool, Error> {
-        todo!()
+    pub(crate) fn insert_row(&mut self, row: Row) -> Result<ProcessedNode, Error> {
+        match &mut self.body {
+            NodeBody::Internal {
+                boundary_keys,
+                children,
+            } => todo!(),
+            NodeBody::Leaf {
+                rows,
+                right_sibling,
+            } => {
+                if rows.len() + 1 < self.order {
+                    match rows.binary_search_by_key(&row.key(), |r| r.key()) {
+                        Ok(_) => Err(Error::DuplicateEntry(row.key())),
+                        Err(i) => {
+                            // don't need to expand, just insert the row and be done
+                            rows.insert(i, row);
+                            Ok(ProcessedNode::SaveOnly(self))
+                        }
+                    }
+                } else {
+                    // TODO: gotta split this mofo
+                    todo!()
+                }
+            }
+        }
     }
 }
 
@@ -152,6 +176,24 @@ impl NodeBody {
                     .expect("can't fail writing to vec");
 
                 bytes
+            }
+        }
+    }
+}
+
+pub(crate) enum ProcessedNode<'a> {
+    SaveOnly(&'a mut Node),
+}
+
+impl<'a> ProcessedNode<'a> {
+    pub(crate) fn finalize<S: TablePageStore>(
+        &mut self,
+        cache: &mut Cache<S, Node>,
+    ) -> Result<Option<usize>, Error> {
+        match self {
+            ProcessedNode::SaveOnly(node) => {
+                cache.put(node.id, *node)?;
+                Ok(None)
             }
         }
     }
