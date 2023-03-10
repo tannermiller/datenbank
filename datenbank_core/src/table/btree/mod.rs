@@ -1,7 +1,7 @@
 use crate::pagestore::{Error as PageError, TablePageStore};
 use crate::schema::{Column, Schema};
 use cache::Cache;
-use node::{Node, NodeBody};
+use node::{Internal, Node, NodeBody};
 use row::Row;
 
 pub mod cache;
@@ -19,6 +19,8 @@ pub enum Error {
     DuplicateEntry(String),
     #[error("invalid column: {0}")]
     InvalidColumn(String),
+    #[error("empty table")]
+    EmptyTable,
 }
 
 // BTRee is a B+ tree that stores the data in a key value store.
@@ -88,14 +90,127 @@ impl<S: TablePageStore> BTree<S> {
         Ok(count_affected)
     }
 
-    fn insert_row(&mut self, root_id: usize, row: Row) -> Result<(), Error> {
-        let root = self.node_cache.get_mut(root_id)?;
+    // find the leaf that either contains a key or should be the leaf into which the key would be
+    // isnerted
+    fn find_containing_leaf(&mut self, key_id: &String) -> Result<(usize, Vec<usize>), Error> {
+        let mut node_id = match self.root {
+            Some(root_id) => root_id,
+            None => return Err(Error::EmptyTable),
+        };
+        let mut path = vec![node_id];
 
-        if let Some(new_child) = root.insert_row(row)?.finalize(&mut self.node_cache)? {
-            // if we get a new_child from this split then we've split the root and need to create a
-            // new root node with the previous root and new child node as children.
-            todo!()
+        loop {
+            let node = self.node_cache.get(node_id)?;
+
+            match &node.body {
+                NodeBody::Internal(Internal {
+                    boundary_keys,
+                    children,
+                }) => {
+                    let key_idx = match boundary_keys.binary_search(key_id) {
+                        // means we found it exactly, will be the first element in the
+                        // children[i+1]
+                        Ok(i) => i + 1,
+                        // means we didn't find it exactly, but this i will be BEFORE the
+                        // corresponding boundary key, so we want the child to the left of it
+                        Err(i) => i,
+                    };
+
+                    node_id = children[key_idx];
+                    path.push(node_id);
+                }
+                NodeBody::Leaf(_) => return Ok((node_id, path)),
+            }
         }
+    }
+
+    fn insert_row(&mut self, root_id: usize, row: Row) -> Result<(), Error> {
+        // The insert algo goes like:
+        //   * Search down the tree and find the node id of the leaf we need to insert the row
+        //     into.
+        //   * Insert the row in the leaf.
+        //   * Iff the sibling splits, then recurse back up the parent chain inserting the
+        //     children and splitting internal nodes.
+        //   * If we walk all the way up the parent chain then we've split the root and must create
+        //     a new root with the old root and the new sibling as its children.
+
+        let (leaf_id, path) = self.find_containing_leaf(&row.key())?;
+
+        let leaf_node = self.node_cache.get_mut(leaf_id)?;
+
+        let row_outcome = match leaf_node.body {
+            NodeBody::Internal(_) => unreachable!(),
+            NodeBody::Leaf(ref mut leaf) => leaf.insert_row(self.order, row)?,
+        };
+
+        let body = match row_outcome {
+            Some(body) => body,
+            None => return Ok(()), // nothing more to do if we didn't split the leaf
+        };
+
+        // We only get past this point if we've split the leaf node and need to insert the new
+        // sibling. left_child and the new_child_id will be the vars that we use to communicate up
+        // each level of the internal nodes to indicate a newly inserted split node.
+        let mut left_child = body.left_child();
+        let mut new_child_id = self.node_cache.allocate()?;
+
+        let split_node = Node {
+            id: new_child_id,
+            order: self.order,
+            body,
+        };
+        self.node_cache.put(new_child_id, split_node)?;
+
+        // now ensure the original leaf has the correct right_sibling set, to the new
+        // split leaf
+        match self.node_cache.get_mut(leaf_id)?.body {
+            NodeBody::Internal(_) => unreachable!(),
+            NodeBody::Leaf(ref mut leaf) => leaf.right_sibling = Some(new_child_id),
+        }
+
+        // finally, we insert the new leaf node in the parent internal node, if we happen to split
+        // that internal node, then we need to recurse back up the internal node above that, etc
+
+        for parent in path.into_iter().rev() {
+            let parent_node = self.node_cache.get_mut(parent)?;
+
+            let internal_node = match &mut parent_node.body {
+                NodeBody::Internal(internal) => internal,
+                NodeBody::Leaf(_) => unreachable!(),
+            };
+
+            let child_outcome = internal_node.insert_child(self.order, new_child_id, left_child)?;
+
+            let body = match child_outcome {
+                Some(body) => body,
+                None => return Ok(()), // didn't split, we're done inserting
+            };
+
+            // update left_child and new_child_id and so that the next loop picks up this value and
+            // inserts into that internal node
+            left_child = body.left_child();
+            new_child_id = self.node_cache.allocate()?;
+
+            let split_node = Node {
+                id: new_child_id,
+                order: self.order,
+                body,
+            };
+            self.node_cache.put(new_child_id, split_node)?;
+        }
+
+        // if we get here then we've split the root node and need a new one whose children are the
+        // old root and the new sibling
+        let new_root_id = self.node_cache.allocate()?;
+        let new_root = Node {
+            id: new_root_id,
+            order: self.order,
+            body: NodeBody::Internal(Internal {
+                boundary_keys: vec![left_child],
+                children: vec![root_id, new_child_id],
+            }),
+        };
+        self.node_cache.put(new_root_id, new_root)?;
 
         Ok(())
     }

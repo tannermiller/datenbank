@@ -58,10 +58,14 @@ impl<S: TablePageStore, P: Page> Cache<S, P> {
             e.insert(Wrapper::new_mutated(page));
         };
 
-        self.cache
+        let wrapper = self
+            .cache
             .get_mut(&page_id)
-            .map(|w| &mut w.data)
-            .ok_or(Error::Io(PageError::UnallocatedPage(page_id))) // shouldn't happen
+            .ok_or(Error::Io(PageError::UnallocatedPage(page_id)))?; // shouldn't happen
+                                                                     //
+        wrapper.was_mutated = true;
+
+        Ok(&mut wrapper.data)
     }
 
     pub(crate) fn allocate(&mut self) -> Result<usize, Error> {
