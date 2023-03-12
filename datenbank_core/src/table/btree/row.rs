@@ -43,13 +43,7 @@ fn pack_row_data(cols: Vec<Column>) -> Vec<u8> {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Row {
     pub(crate) schema: Schema,
-    pub(crate) body: RefCell<RowBody>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RowBody {
-    Packed(Vec<u8>),
-    Unpacked(Vec<RowCol>),
+    pub(crate) body: RefCell<Vec<RowCol>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -153,7 +147,7 @@ impl ProcessedRow {
 
         Ok(Row {
             schema,
-            body: RefCell::new(RowBody::Unpacked(result_rows)),
+            body: RefCell::new(result_rows),
         })
     }
 }
@@ -340,14 +334,14 @@ mod test {
         assert_eq!(
             Row {
                 schema,
-                body: RefCell::new(RowBody::Unpacked(vec![
+                body: RefCell::new(vec![
                     RowCol::Int(7),
                     RowCol::Bool(true),
                     RowCol::VarChar(RowVarChar {
                         inline: base_str,
                         next_page: Some(1),
                     }),
-                ])),
+                ]),
             },
             row
         );

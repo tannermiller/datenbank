@@ -233,7 +233,7 @@ mod test {
     use std::cell::RefCell;
 
     use super::node::Leaf;
-    use super::row::{RowBody, RowCol};
+    use super::row::RowCol;
     use super::*;
     use crate::pagestore::Memory;
     use crate::schema::ColumnType;
@@ -245,7 +245,7 @@ mod test {
             body: NodeBody::Leaf(Leaf {
                 rows: vec![Row {
                     schema,
-                    body: RefCell::new(RowBody::Unpacked(row_data)),
+                    body: RefCell::new(row_data),
                 }],
                 right_sibling: None,
             }),
