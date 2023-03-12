@@ -42,8 +42,8 @@ fn pack_row_data(cols: Vec<Column>) -> Vec<u8> {
 // This holds a single row's worth of data.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Row {
-    schema: Schema,
-    body: RefCell<RowBody>,
+    pub(crate) schema: Schema,
+    pub(crate) body: RefCell<RowBody>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -61,8 +61,8 @@ pub(crate) enum RowCol {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RowVarChar {
-    inline: String,
-    next_page: Option<usize>,
+    pub(crate) inline: String,
+    pub(crate) next_page: Option<usize>,
 }
 
 impl Row {
