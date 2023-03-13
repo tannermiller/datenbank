@@ -6,6 +6,9 @@ use super::Error;
 use crate::pagestore::TablePageStore;
 use crate::schema::{size_of_packed_cols, Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
 
+// the max amount of a varchar that is used in the key
+const MAX_KEY_VAR_CHAR_LEN: usize = 128;
+
 // TODO: This needs to be in terms of RowCol
 fn pack_row_data(cols: Vec<Column>) -> Vec<u8> {
     let size = size_of_packed_cols(&cols);
@@ -68,10 +71,25 @@ impl Row {
         todo!()
     }
 
+    // generate a key string that represents the row
     pub(crate) fn key(&self) -> String {
-        // TODO: extract the row key, this will start with just all the columns, but this will be
-        // more important when I impl primary keys and indexes as it will be different for those.
-        todo!()
+        let body = self.body.borrow();
+        let mut parts = Vec::with_capacity(body.len());
+
+        // this is probably not the most efficient way to do this
+        for col in body.iter() {
+            match col {
+                RowCol::Int(i) => parts.push(i.to_string()),
+                RowCol::Bool(b) => parts.push(if *b { 't' } else { 'f' }.to_string()),
+                RowCol::VarChar(vc) => {
+                    parts.push(String::from_iter(
+                        vc.inline.chars().take(MAX_KEY_VAR_CHAR_LEN),
+                    ));
+                }
+            }
+        }
+
+        parts.join("_")
     }
 }
 
