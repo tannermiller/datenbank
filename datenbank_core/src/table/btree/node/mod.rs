@@ -1,8 +1,8 @@
-use std::io::Write;
-
 use super::cache::Page;
 use super::row::Row;
 use super::Error;
+
+mod encode;
 
 // This represents a single node in the B+ Tree, it contains the metadata of the node as well as
 // the node body itself.
@@ -26,47 +26,15 @@ impl Node {
             }),
         }
     }
-
-    pub(crate) fn encode(&self) -> Vec<u8> {
-        // we encode the body first even though it goes at the end of the byte vector so that we
-        // can correctly allocate the returned vector.
-        let body_bytes = self.body.encode();
-
-        // body + id + order + body type
-        let mut bytes = Vec::with_capacity(body_bytes.len() + 4 + 4 + 1);
-
-        bytes
-            .write_all(&(self.id as u32).to_be_bytes())
-            .expect("can't fail writing to vec");
-
-        bytes
-            .write_all(&(self.order as u32).to_be_bytes())
-            .expect("can't fail writing to vec");
-
-        let body_type = match self.body {
-            NodeBody::Internal { .. } => 0u8,
-            NodeBody::Leaf { .. } => 1,
-        };
-        bytes
-            .write_all(&body_type.to_be_bytes())
-            .expect("can't fail writing to vec");
-
-        // finally write the body bytes
-        bytes
-            .write_all(&body_bytes)
-            .expect("can't fail writing to vec");
-
-        bytes
-    }
 }
 
 impl Page for Node {
     fn encode(&self) -> Vec<u8> {
-        todo!()
+        encode::encode_node(self)
     }
 
     fn decode(data: &[u8]) -> Result<Self, Error> {
-        todo!()
+        encode::decode_node(data)
     }
 }
 
@@ -81,69 +49,6 @@ pub(crate) enum NodeBody {
 }
 
 impl NodeBody {
-    fn encode(&self) -> Vec<u8> {
-        match self {
-            NodeBody::Internal(Internal {
-                boundary_keys,
-                children,
-            }) => {
-                let mut bytes = Vec::with_capacity(boundary_keys.len() * 20 + children.len() * 4);
-
-                bytes
-                    .write_all(&(boundary_keys.len() as u32).to_be_bytes())
-                    .expect("can't fail writing to vec");
-
-                for k in boundary_keys {
-                    let kb = k.as_bytes();
-                    bytes
-                        .write_all(&(kb.len() as u32).to_be_bytes())
-                        .expect("can't fail writing to vec");
-                    bytes.write_all(kb).expect("can't fail writing to vec");
-                }
-
-                bytes
-                    .write_all(&(children.len() as u32).to_be_bytes())
-                    .expect("can't fail writing to vec");
-
-                for c in children {
-                    bytes
-                        .write_all(&(*c as u32).to_be_bytes())
-                        .expect("can't fail writing to vec");
-                }
-
-                bytes
-            }
-            NodeBody::Leaf(Leaf {
-                rows,
-                right_sibling,
-            }) => {
-                let mut bytes = Vec::with_capacity(rows.len() * 100 + 4);
-
-                bytes
-                    .write_all(&(rows.len() as u32).to_be_bytes())
-                    .expect("can't fail writing to vec");
-
-                for row in rows {
-                    let rb = row.encode();
-                    bytes
-                        .write_all(&(rb.len() as u32).to_be_bytes())
-                        .expect("can't fail writing to vec");
-                    bytes.write_all(&rb).expect("can't fail writing to vec");
-                }
-
-                let rs_encoded = match right_sibling {
-                    Some(rs) => *rs,
-                    None => 0,
-                };
-                bytes
-                    .write_all(&(rs_encoded as u32).to_be_bytes())
-                    .expect("can't fail writing to vec");
-
-                bytes
-            }
-        }
-    }
-
     pub(crate) fn left_child(&self) -> String {
         match self {
             NodeBody::Leaf(Leaf { rows, .. }) => rows[0].key(),

@@ -2,7 +2,7 @@ use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder
 use crate::schema::{Column, Error as SchemaError, Schema};
 use btree::{BTree, Error as BTreeError};
 
-mod btree;
+pub(crate) mod btree;
 mod header;
 
 #[derive(Debug, thiserror::Error, PartialEq)]

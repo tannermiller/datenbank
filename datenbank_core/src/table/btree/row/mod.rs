@@ -1,52 +1,20 @@
-use std::cell::RefCell;
 use std::io::Write;
 
 use super::cache::Cache;
 use super::Error;
 use crate::pagestore::TablePageStore;
-use crate::schema::{size_of_packed_cols, Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
+use crate::schema::{Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
+
+pub(crate) mod encode;
 
 // the max amount of a varchar that is used in the key
 const MAX_KEY_VAR_CHAR_LEN: usize = 128;
-
-// TODO: This needs to be in terms of RowCol
-fn pack_row_data(cols: Vec<Column>) -> Vec<u8> {
-    let size = size_of_packed_cols(&cols);
-
-    let mut row_data = Vec::with_capacity(size);
-
-    for col in cols {
-        match col {
-            Column::VarChar(vc) => {
-                // write len first
-                row_data
-                    .write_all(&(vc.len() as u16).to_be_bytes())
-                    .expect("can't fail writing to vec");
-                // and write the string data
-                row_data
-                    .write_all(vc.as_bytes())
-                    .expect("can't fail writing to vec");
-            }
-            Column::Int(i) => {
-                row_data
-                    .write_all(&i.to_be_bytes())
-                    .expect("can't fail writing to vec");
-            }
-            Column::Bool(b) => {
-                let b = if b { 1 } else { 0 };
-                row_data.write_all(&[b]).expect("can't fail writing to vec");
-            }
-        }
-    }
-
-    row_data
-}
 
 // This holds a single row's worth of data.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Row {
     pub(crate) schema: Schema,
-    pub(crate) body: RefCell<Vec<RowCol>>,
+    pub(crate) body: Vec<RowCol>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -63,21 +31,12 @@ pub(crate) struct RowVarChar {
 }
 
 impl Row {
-    pub(crate) fn encode(&self) -> Vec<u8> {
-        // TODO: so the problem here is that we need to split out the overflowed varchars and
-        // return those up. But where do we actually handle storing those as we need to know their
-        // ids before we encode them.
-
-        todo!()
-    }
-
     // generate a key string that represents the row
     pub(crate) fn key(&self) -> String {
-        let body = self.body.borrow();
-        let mut parts = Vec::with_capacity(body.len());
+        let mut parts = Vec::with_capacity(self.body.len());
 
         // this is probably not the most efficient way to do this
-        for col in body.iter() {
+        for col in &self.body {
             match col {
                 RowCol::Int(i) => parts.push(i.to_string()),
                 RowCol::Bool(b) => parts.push(if *b { 't' } else { 'f' }.to_string()),
@@ -165,7 +124,7 @@ impl ProcessedRow {
 
         Ok(Row {
             schema,
-            body: RefCell::new(result_rows),
+            body: result_rows,
         })
     }
 }
@@ -218,21 +177,6 @@ mod test {
     use super::*;
     use crate::pagestore::Memory;
     use crate::schema::ColumnType;
-
-    #[test]
-    fn test_pack_row_data() {
-        let cols = vec![
-            Column::VarChar("0123456789".to_string()),
-            Column::Int(7),
-            Column::Bool(true),
-        ];
-        let bytes = pack_row_data(cols);
-        assert_eq!(17, bytes.len());
-        assert_eq!(
-            vec![0, 10, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 0, 0, 0, 7, 1],
-            bytes
-        );
-    }
 
     #[test]
     fn test_process_columns() {
@@ -352,14 +296,14 @@ mod test {
         assert_eq!(
             Row {
                 schema,
-                body: RefCell::new(vec![
+                body: vec![
                     RowCol::Int(7),
                     RowCol::Bool(true),
                     RowCol::VarChar(RowVarChar {
                         inline: base_str,
                         next_page: Some(1),
                     }),
-                ]),
+                ],
             },
             row
         );

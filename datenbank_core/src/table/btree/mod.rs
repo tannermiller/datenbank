@@ -7,7 +7,7 @@ use row::Row;
 pub mod cache;
 mod encode;
 mod node;
-mod row;
+pub(crate) mod row;
 
 pub use encode::decode;
 
@@ -21,6 +21,8 @@ pub enum Error {
     InvalidColumn(String),
     #[error("empty table")]
     EmptyTable,
+    #[error("unrecoverable error: {0}")]
+    UnrecoverableError(String),
 }
 
 // BTRee is a B+ tree that stores the data in a key value store.
@@ -230,8 +232,6 @@ impl<S: TablePageStore> BTree<S> {
 
 #[cfg(test)]
 mod test {
-    use std::cell::RefCell;
-
     use super::node::Leaf;
     use super::row::RowCol;
     use super::*;
@@ -245,7 +245,7 @@ mod test {
             body: NodeBody::Leaf(Leaf {
                 rows: vec![Row {
                     schema,
-                    body: RefCell::new(row_data),
+                    body: row_data,
                 }],
                 right_sibling: None,
             }),

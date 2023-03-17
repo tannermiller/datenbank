@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use crate::parser::Literal;
+use crate::table::btree::row::{RowCol, RowVarChar};
 
 mod encode;
 
@@ -39,72 +40,18 @@ impl Schema {
         Ok(Schema { columns })
     }
 
-    // TODO: replace this with the actual parsing logic, that is enough validation, probably
-    pub fn validate_packed(&self, packed_row: &[u8]) -> bool {
-        let mut i = 0;
-        for (_, col) in self.columns.iter() {
-            let consumed_len = match col {
-                ColumnType::VarChar(schema_len) => {
-                    if packed_row.len() < i + 2 {
-                        return false;
-                    }
-
-                    // try to clone and convert to u16
-                    if let Ok(len_bytes) = packed_row[i..i + 2].try_into() {
-                        // get the expected len
-                        let vc_len = u16::from_be_bytes(len_bytes);
-                        if vc_len > *schema_len {
-                            return false;
-                        }
-
-                        let total_column_len = 2 + vc_len as usize;
-
-                        // ensure the packed_row is at least that long now
-                        if packed_row.len() < i + total_column_len {
-                            return false;
-                        }
-
-                        total_column_len
-                    } else {
-                        return false;
-                    }
-                }
-                ColumnType::Int => {
-                    if packed_row.len() < i + 4 {
-                        return false;
-                    }
-
-                    4
-                }
-                ColumnType::Bool => {
-                    if packed_row.len() < i + 1 {
-                        return false;
-                    }
-
-                    1
-                }
-            };
-
-            i += consumed_len;
-        }
-
-        // We've reached the end of our expected columns but if there is more in the packed row we
-        // haven't consumed yet, then that's an issue.
-        i == packed_row.len()
-    }
-
-    pub fn validate_columns(&self, cols: &[Column]) -> bool {
+    pub(crate) fn validate_columns(&self, cols: &[RowCol]) -> bool {
         if self.columns.len() != cols.len() {
             return false;
         }
 
         for ((_, schema_col), col) in self.columns.iter().zip(cols.iter()) {
             let is_valid = match (schema_col, col) {
-                (ColumnType::VarChar(schema_len), Column::VarChar(col_value)) => {
-                    col_value.len() <= *schema_len as usize
+                (ColumnType::VarChar(schema_len), RowCol::VarChar(RowVarChar { inline, .. })) => {
+                    inline.len() <= *schema_len as usize
                 }
-                (ColumnType::Int, Column::Int(_)) => true,
-                (ColumnType::Bool, Column::Bool(_)) => true,
+                (ColumnType::Int, RowCol::Int(_)) => true,
+                (ColumnType::Bool, RowCol::Bool(_)) => true,
                 _ => false,
             };
 
@@ -288,19 +235,6 @@ pub enum Column {
     Bool(bool),
 }
 
-// Find the total allocated size of bytes we need to fit these columns in a node.
-pub fn size_of_packed_cols(cols: &[Column]) -> usize {
-    cols.iter().fold(0, |acc, col| match col {
-        // size of len (2 bytes) + size of data itself
-        Column::VarChar(s) => {
-            let size = s.as_bytes().len();
-            acc + 2 + std::cmp::min(size, MAX_INLINE_VAR_LEN_COL_SIZE)
-        }
-        Column::Int(_) => acc + 4,
-        Column::Bool(_) => acc + 1,
-    })
-}
-
 // A data type for a single column.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ColumnType {
@@ -452,16 +386,6 @@ mod test {
             &vec![0, 0, 0, 1, 1, 0, 5, 104, 111, 119, 100],
             false,
         );
-    }
-
-    #[test]
-    fn test_size_of_packed_cols() {
-        let cols = vec![
-            Column::VarChar("012345678901234567890123456789".to_string()),
-            Column::Int(7),
-            Column::Bool(true),
-        ];
-        assert_eq!(37, size_of_packed_cols(&cols));
     }
 
     #[test]
