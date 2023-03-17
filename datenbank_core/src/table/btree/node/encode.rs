@@ -2,10 +2,12 @@ use std::io::Write;
 
 use nom::branch::alt;
 use nom::bytes::complete::tag;
-use nom::multi::length_count;
+use nom::combinator::rest;
+use nom::error::{make_error, ErrorKind};
+use nom::multi::{length_count, length_value};
 use nom::number::complete::be_u32;
 use nom::sequence::pair;
-use nom::IResult;
+use nom::{Err as NomErr, IResult};
 
 use super::super::row::encode::{decode_row, encode_row};
 use super::super::Error;
@@ -71,12 +73,44 @@ fn inner_decode_node(input: &[u8]) -> IResult<&[u8], Node> {
 }
 
 fn decode_leaf(input: &[u8]) -> IResult<&[u8], NodeBody> {
-    let (input, rows) = length_count(be_u32, decode_row)(input)?;
-    todo!()
+    let (input, rows) = length_count(be_u32, length_value(be_u32, decode_row))(input)?;
+
+    let (input, right_sibling) = be_u32(input)?;
+    let right_sibling = if right_sibling == 0 {
+        None
+    } else {
+        Some(right_sibling as usize)
+    };
+
+    Ok((
+        input,
+        NodeBody::Leaf(Leaf {
+            rows,
+            right_sibling,
+        }),
+    ))
 }
 
 fn decode_internal(input: &[u8]) -> IResult<&[u8], NodeBody> {
-    todo!()
+    let (input, bks) = length_count(be_u32, length_value(be_u32, rest))(input)?;
+    let boundary_keys = bks
+        .into_iter()
+        .map(|v| {
+            String::from_utf8(v.to_vec())
+                .map_err(|_| NomErr::Failure(make_error(input, ErrorKind::Verify)))
+        })
+        .collect::<Result<Vec<String>, _>>()?;
+
+    let (input, children) = length_count(be_u32, be_u32)(input)?;
+    let children = children.into_iter().map(|c| c as usize).collect();
+
+    Ok((
+        input,
+        NodeBody::Internal(Internal {
+            boundary_keys,
+            children,
+        }),
+    ))
 }
 
 fn encode_leaf(
@@ -147,5 +181,56 @@ fn encode_body(body: &NodeBody) -> Vec<u8> {
     match body {
         NodeBody::Internal(internal) => encode_internal(internal),
         NodeBody::Leaf(leaf) => encode_leaf(leaf),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use super::super::Leaf;
+    use crate::table::btree::row::{Row, RowCol, RowVarChar};
+
+    #[test]
+    fn test_encode_decode_leaf() {
+        let leaf_node = Node {
+            id: 7,
+            order: 10,
+            body: NodeBody::Leaf(Leaf {
+                rows: vec![Row {
+                    body: vec![
+                        RowCol::Int(7),
+                        RowCol::Bool(true),
+                        RowCol::VarChar(RowVarChar {
+                            inline: "Hello, World!".to_string(),
+                            next_page: Some(11),
+                        }),
+                    ],
+                }],
+                right_sibling: Some(11),
+            }),
+        };
+
+        let encoded = encode_node(&leaf_node);
+        let decoded = decode_node(&encoded).unwrap();
+
+        assert_eq!(leaf_node, decoded)
+    }
+
+    #[test]
+    fn test_encode_decode_internal() {
+        let internal_node = Node {
+            id: 7,
+            order: 10,
+            body: NodeBody::Internal(Internal {
+                boundary_keys: vec!["hello".to_string(), "world".to_string()],
+                children: vec![5, 7, 11],
+            }),
+        };
+
+        let encoded = encode_node(&internal_node);
+        let decoded = decode_node(&encoded).unwrap();
+
+        assert_eq!(internal_node, decoded)
     }
 }

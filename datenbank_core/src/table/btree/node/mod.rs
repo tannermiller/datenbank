@@ -6,7 +6,7 @@ mod encode;
 
 // This represents a single node in the B+ Tree, it contains the metadata of the node as well as
 // the node body itself.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Node {
     // The ID of this node acts as the key we use to store it with.
     pub(crate) id: usize,
@@ -39,7 +39,7 @@ impl Page for Node {
 }
 
 // This represents which type this node is and contains the type-specific data for each one.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum NodeBody {
     // Internal nodes contain the boundary keys (first of each next child) and the pointers to the
     // child nodes. No rows are stored here.
@@ -59,7 +59,7 @@ impl NodeBody {
 
 // Houses the internal-node specific fields for a node. The boundary_keys will always have a length
 // one less than the children as they come from the first child of each non-first child.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Internal {
     pub(crate) boundary_keys: Vec<String>, // TODO: should these be Vec<u8>?
     pub(crate) children: Vec<usize>,
@@ -117,7 +117,7 @@ impl Internal {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Leaf {
     // the actual row data for this leaf node
     pub(crate) rows: Vec<Row>,
