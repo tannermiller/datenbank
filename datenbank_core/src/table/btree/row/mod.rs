@@ -3,7 +3,7 @@ use std::io::Write;
 use super::cache::Cache;
 use super::Error;
 use crate::pagestore::TablePageStore;
-use crate::schema::{Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
+use crate::schema::{Column, MAX_INLINE_VAR_LEN_COL_SIZE};
 
 pub(crate) mod encode;
 
@@ -13,7 +13,6 @@ const MAX_KEY_VAR_CHAR_LEN: usize = 128;
 // This holds a single row's worth of data.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Row {
-    pub(crate) schema: Schema,
     pub(crate) body: Vec<RowCol>,
 }
 
@@ -57,7 +56,6 @@ impl Row {
 // separately.
 #[derive(Debug, PartialEq)]
 pub(crate) struct ProcessedRow {
-    schema: Schema,
     columns: Vec<(RowCol, Option<Vec<Vec<u8>>>)>,
 }
 
@@ -68,7 +66,7 @@ impl ProcessedRow {
         self,
         cache: &mut Cache<S, Vec<u8>>,
     ) -> Result<Row, Error> {
-        let ProcessedRow { schema, columns } = self;
+        let ProcessedRow { columns } = self;
 
         let mut result_rows = Vec::with_capacity(columns.len());
         for (mut row, data_pages) in columns {
@@ -122,18 +120,11 @@ impl ProcessedRow {
             result_rows.push(row);
         }
 
-        Ok(Row {
-            schema,
-            body: result_rows,
-        })
+        Ok(Row { body: result_rows })
     }
 }
 
-pub(crate) fn process_columns(
-    schema: Schema,
-    page_size: usize,
-    cols: Vec<Column>,
-) -> Result<ProcessedRow, Error> {
+pub(crate) fn process_columns(page_size: usize, cols: Vec<Column>) -> Result<ProcessedRow, Error> {
     let columns = cols
         .into_iter()
         .map(|col| match col {
@@ -169,24 +160,18 @@ pub(crate) fn process_columns(
         })
         .collect::<Result<Vec<(RowCol, Option<Vec<Vec<u8>>>)>, Error>>()?;
 
-    Ok(ProcessedRow { schema, columns })
+    Ok(ProcessedRow { columns })
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::pagestore::Memory;
-    use crate::schema::ColumnType;
 
     #[test]
     fn test_process_columns() {
-        fn check(
-            schema: Schema,
-            page_size: usize,
-            cols: Vec<Column>,
-            expected: Option<ProcessedRow>,
-        ) {
-            let result = process_columns(schema, page_size, cols);
+        fn check(page_size: usize, cols: Vec<Column>, expected: Option<ProcessedRow>) {
+            let result = process_columns(page_size, cols);
             match (result, expected) {
                 (Ok(cols), Some(exp)) => assert_eq!(exp, cols),
                 (Err(_), None) => (),
@@ -195,23 +180,15 @@ mod test {
             }
         }
 
-        let schema = Schema::new(vec![
-            ("foo".into(), ColumnType::Int),
-            ("bar".into(), ColumnType::Bool),
-            ("qux".into(), ColumnType::VarChar(10)),
-        ])
-        .unwrap();
         let cols = vec![
             Column::Int(7),
             Column::Bool(true),
             Column::VarChar("0123456789".to_string()),
         ];
         check(
-            schema.clone(),
             64,
             cols.clone(),
             Some(ProcessedRow {
-                schema: schema.clone(),
                 columns: vec![
                     (RowCol::Int(7), None),
                     (RowCol::Bool(true), None),
@@ -235,11 +212,9 @@ mod test {
             Column::VarChar(var_char_value),
         ];
         check(
-            schema.clone(),
             8, // absurdly low to verify paging is correct
             cols.clone(),
             Some(ProcessedRow {
-                schema,
                 columns: vec![
                     (RowCol::Int(7), None),
                     (RowCol::Bool(true), None),
@@ -264,15 +239,8 @@ mod test {
     fn test_processed_rows_finalize() {
         let mut store = Memory::new(64);
         let mut data_cache = Cache::new(store.clone());
-        let schema = Schema::new(vec![
-            ("foo".into(), ColumnType::Int),
-            ("bar".into(), ColumnType::Bool),
-            ("qux".into(), ColumnType::VarChar(10)),
-        ])
-        .unwrap();
         let base_str = "1".repeat(MAX_INLINE_VAR_LEN_COL_SIZE);
         let pr = ProcessedRow {
-            schema: schema.clone(),
             columns: vec![
                 (RowCol::Int(7), None),
                 (RowCol::Bool(true), None),
@@ -295,7 +263,6 @@ mod test {
 
         assert_eq!(
             Row {
-                schema,
                 body: vec![
                     RowCol::Int(7),
                     RowCol::Bool(true),

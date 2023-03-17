@@ -2,10 +2,12 @@ use std::io::Write;
 
 use nom::branch::alt;
 use nom::bytes::complete::tag;
-use nom::multi::length_count;
-use nom::number::complete::be_u32;
+use nom::combinator::{rest, value};
+use nom::error::{make_error, ErrorKind};
+use nom::multi::{length_count, length_value};
+use nom::number::complete::{be_i32, be_u16, be_u32};
 use nom::sequence::pair;
-use nom::IResult;
+use nom::{Err as NomErr, IResult};
 
 use super::{Row, RowCol, RowVarChar};
 
@@ -72,28 +74,64 @@ pub(crate) fn decode_row(input: &[u8]) -> IResult<&[u8], Row> {
 
     let body = row_cols.into_iter().map(|(_, rc)| rc).collect();
 
-    if !schema.validate_columns(&body) {
-        // TOOD: return error
-        todo!()
-    }
-
-    Ok((
-        input,
-        Row {
-            schema: schema.clone(),
-            body,
-        },
-    ))
+    Ok((input, Row { body }))
 }
 
 fn decode_varchar(input: &[u8]) -> IResult<&[u8], RowCol> {
-    todo!()
+    let (input, val) = length_value(be_u16, rest)(input)?;
+    let inline = match String::from_utf8(val.to_vec()) {
+        Ok(inline) => inline,
+        Err(_) => return Err(NomErr::Failure(make_error(input, ErrorKind::Verify))),
+    };
+
+    let (input, next_page) = be_u32(input)?;
+    let next_page = if next_page == 0 {
+        None
+    } else {
+        Some(next_page as usize)
+    };
+
+    Ok((input, RowCol::VarChar(RowVarChar { inline, next_page })))
 }
 
 fn decode_int(input: &[u8]) -> IResult<&[u8], RowCol> {
-    todo!()
+    be_i32(input).map(|(input, val)| (input, RowCol::Int(val)))
 }
 
 fn decode_bool(input: &[u8]) -> IResult<&[u8], RowCol> {
-    todo!()
+    alt((
+        value(RowCol::Bool(false), tag(&[0])),
+        value(RowCol::Bool(true), tag(&[1])),
+    ))(input)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_encode_decode() {
+        let row = Row {
+            body: vec![
+                RowCol::Int(7),
+                RowCol::Bool(true),
+                RowCol::VarChar(RowVarChar {
+                    inline: "Hello, World!".to_string(),
+                    next_page: Some(11),
+                }),
+                RowCol::VarChar(RowVarChar {
+                    inline: "I'm different".to_string(),
+                    next_page: None,
+                }),
+                RowCol::Bool(false),
+                RowCol::Int(8),
+            ],
+        };
+
+        let encoded = encode_row(&row);
+        let (rest, decoded) = decode_row(&encoded).unwrap();
+
+        assert!(rest.is_empty());
+        assert_eq!(row, decoded);
+    }
 }

@@ -40,29 +40,6 @@ impl Schema {
         Ok(Schema { columns })
     }
 
-    pub(crate) fn validate_columns(&self, cols: &[RowCol]) -> bool {
-        if self.columns.len() != cols.len() {
-            return false;
-        }
-
-        for ((_, schema_col), col) in self.columns.iter().zip(cols.iter()) {
-            let is_valid = match (schema_col, col) {
-                (ColumnType::VarChar(schema_len), RowCol::VarChar(RowVarChar { inline, .. })) => {
-                    inline.len() <= *schema_len as usize
-                }
-                (ColumnType::Int, RowCol::Int(_)) => true,
-                (ColumnType::Bool, RowCol::Bool(_)) => true,
-                _ => false,
-            };
-
-            if !is_valid {
-                return false;
-            }
-        }
-
-        true
-    }
-
     pub fn len(&self) -> usize {
         self.columns.len()
     }
@@ -288,104 +265,6 @@ mod test {
             ("foo".into(), ColumnType::Bool),
         ]);
         assert_eq!(Err(Error::NonUniqueColumn("foo".into())), res);
-    }
-
-    #[test]
-    fn test_schema_validate_columns() {
-        fn check(schema: &Schema, cols: &[Column], expected_result: bool) {
-            assert_eq!(expected_result, schema.validate_columns(cols));
-        }
-
-        let schema = Schema::new(vec![
-            ("foo".into(), ColumnType::Int),
-            ("bar".into(), ColumnType::Bool),
-            ("baz".into(), ColumnType::VarChar(3000)),
-            ("qux".into(), ColumnType::VarChar(10)),
-        ])
-        .unwrap();
-
-        // valid
-        check(
-            &schema,
-            &vec![
-                Column::Int(7),
-                Column::Bool(true),
-                Column::VarChar("howdy".to_string()),
-                Column::VarChar("partner".to_string()),
-            ],
-            true,
-        );
-
-        // not enough columns
-        check(&schema, &vec![Column::Int(7)], false);
-
-        // out of order
-        check(
-            &schema,
-            &vec![
-                Column::Bool(true),
-                Column::Int(7),
-                Column::VarChar("howdy".to_string()),
-                Column::VarChar("partner".to_string()),
-            ],
-            false,
-        );
-
-        // too many columns
-        check(
-            &schema,
-            &vec![
-                Column::Bool(true),
-                Column::Int(7),
-                Column::VarChar("howdy".to_string()),
-                Column::VarChar("partner".to_string()),
-                Column::Bool(false),
-            ],
-            false,
-        );
-
-        // varchar too long
-        check(
-            &schema,
-            &vec![
-                Column::Int(7),
-                Column::Bool(true),
-                Column::VarChar("howdy".to_string()),
-                Column::VarChar("01234567890123456789".to_string()),
-            ],
-            false,
-        );
-    }
-
-    #[test]
-    fn test_schema_validate_packed() {
-        fn check(schema: &Schema, cols: &[u8], expected_result: bool) {
-            assert_eq!(expected_result, schema.validate_packed(cols));
-        }
-
-        let schema = Schema::new(vec![
-            ("foo".into(), ColumnType::Int),
-            ("bar".into(), ColumnType::Bool),
-            ("qux".into(), ColumnType::VarChar(10)),
-        ])
-        .unwrap();
-
-        // valid
-        check(
-            &schema,
-            &vec![0, 0, 0, 1, 1, 0, 5, 104, 111, 119, 100, 121],
-            true,
-        );
-
-        // too short
-        check(&schema, &vec![0], false);
-
-        // too long varchar is too short
-        check(
-            &schema,
-            &vec![0, 0, 0, 1, 1, 0, 5, 104, 111, 119, 100],
-            false,
-        );
     }
 
     #[test]

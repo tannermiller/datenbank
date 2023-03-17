@@ -10,7 +10,6 @@ use nom::IResult;
 use super::super::row::encode::{decode_row, encode_row};
 use super::super::Error;
 use super::{Internal, Leaf, Node, NodeBody};
-use crate::schema::Schema;
 
 pub(crate) fn encode_node(node: &Node) -> Vec<u8> {
     // we encode the body first even though it goes at the end of the byte vector so that we
@@ -44,8 +43,8 @@ pub(crate) fn encode_node(node: &Node) -> Vec<u8> {
     bytes
 }
 
-pub(crate) fn decode_node(input: &[u8], schema: &Schema) -> Result<Node, Error> {
-    match inner_decode_node(input, schema) {
+pub(crate) fn decode_node(input: &[u8]) -> Result<Node, Error> {
+    match inner_decode_node(input) {
         Err(err) => Err(Error::UnrecoverableError(err.to_string())),
         // in this case, if there'e extra input but we parsed a whole node out then we are probably
         // fine as next time we edit this page we'll probably just overwrite the extra bytes
@@ -53,12 +52,12 @@ pub(crate) fn decode_node(input: &[u8], schema: &Schema) -> Result<Node, Error> 
     }
 }
 
-fn inner_decode_node(input: &[u8], schema: &Schema) -> IResult<&[u8], Node> {
+fn inner_decode_node(input: &[u8]) -> IResult<&[u8], Node> {
     let (input, id) = be_u32(input)?;
     let (input, order) = be_u32(input)?;
     let (input, (_, body)) = alt((
         pair(tag(&[0u8]), decode_internal),
-        pair(tag(&[1u8]), decode_leaf(schema)),
+        pair(tag(&[1u8]), decode_leaf),
     ))(input)?;
 
     Ok((
@@ -71,11 +70,9 @@ fn inner_decode_node(input: &[u8], schema: &Schema) -> IResult<&[u8], Node> {
     ))
 }
 
-fn decode_leaf(schema: &Schema) -> impl Fn(input: &[u8]) -> IResult<&[u8], NodeBody> {
-    |input| {
+fn decode_leaf(input: &[u8]) -> IResult<&[u8], NodeBody> {
     let (input, rows) = length_count(be_u32, decode_row)(input)?;
     todo!()
-    }
 }
 
 fn decode_internal(input: &[u8]) -> IResult<&[u8], NodeBody> {

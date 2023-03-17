@@ -78,9 +78,8 @@ impl<S: TablePageStore> BTree<S> {
 
         let mut count_affected = 0;
         for value in values {
-            let row =
-                row::process_columns(self.schema.clone(), self.store.usable_page_size(), value)?
-                    .finalize(&mut self.data_cache)?;
+            let row = row::process_columns(self.store.usable_page_size(), value)?
+                .finalize(&mut self.data_cache)?;
 
             self.insert_row(root_id, row)?;
 
@@ -243,10 +242,7 @@ mod test {
             id,
             order,
             body: NodeBody::Leaf(Leaf {
-                rows: vec![Row {
-                    schema,
-                    body: row_data,
-                }],
+                rows: vec![Row { body: row_data }],
                 right_sibling: None,
             }),
         }
