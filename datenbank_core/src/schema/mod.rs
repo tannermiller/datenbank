@@ -137,14 +137,23 @@ impl Schema {
     // Determine the maximum size of a row inline in the leaf node. Anything over this size will be
     // stored externally to the row.
     pub fn max_inline_row_size(&self) -> usize {
+        // 4 for overall encoded row size
+        // one per column, to determine the type
+        // for varchar:
+        //   * 2 for inline len
+        //   * N for the acutal len
+        //   * 4 for page of continued value
+        // for int: 4 bytes
+        // for bool: 1 bytes
         self.columns.iter().fold(0, |acc, (_, col)| match col {
-            // size of len (2 bytes) + size of data itself
+            // size of type flag (1 byte) + len (2 bytes) + size of data itself + next page pointer
+            // (4 bytes)
             ColumnType::VarChar(size) => {
-                acc + 2 + std::cmp::min(*size as usize, MAX_INLINE_VAR_LEN_COL_SIZE)
+                acc + 7 + std::cmp::min(*size as usize, MAX_INLINE_VAR_LEN_COL_SIZE)
             }
-            ColumnType::Int => acc + 4,
-            ColumnType::Bool => acc + 1,
-        })
+            ColumnType::Int => acc + 5,  // 4 bytes int + 1 for type flag
+            ColumnType::Bool => acc + 2, // 1 bytes for bool val + 1 for type flag
+        }) + 4
     }
 
     pub fn columns(&self) -> &[(String, ColumnType)] {
@@ -348,7 +357,7 @@ mod test {
                 ("qux".into(), ColumnType::VarChar(10)),
             ])
             .unwrap(),
-            17,
+            28,
         );
         check(
             &Schema::new(vec![
@@ -357,7 +366,7 @@ mod test {
                 ("qux".into(), ColumnType::VarChar(1024)),
             ])
             .unwrap(),
-            519,
+            530,
         );
     }
 

@@ -42,10 +42,11 @@ pub struct BTree<S: TablePageStore> {
 impl<S: TablePageStore> BTree<S> {
     // Build a brand new btree with no data in it.
     pub fn new(name: String, schema: Schema, store: S) -> Result<BTree<S>, Error> {
-        // TODO: There's going to be some other per-node overhead that needs to be factored in
-        // here.
-        let row_size = schema.max_inline_row_size();
-        let order = store.usable_page_size() / row_size;
+        // row size itself + 4 bytes for the body len
+        let row_size = schema.max_inline_row_size() + 4;
+
+        // 9 bytes of node-overhead + 4 bytes for # of rows + 4 bytes for right_sibling + row_body
+        let order = (store.usable_page_size() - 17) / row_size;
 
         Ok(BTree {
             name,

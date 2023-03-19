@@ -158,9 +158,6 @@ impl Leaf {
                 }
             }
 
-            // TODO: We need to set the right_sibling on the left sibling, and we don't know what
-            // it is until we allocate
-
             Ok(Some(NodeBody::Leaf(Leaf {
                 rows: right_sib_rows,
                 right_sibling: self.right_sibling,
