@@ -1,7 +1,7 @@
 use datenbank_core::Database;
 
 #[test]
-fn test_create_table() {
+fn test_basic_integration() {
     let mut db = Database::memory();
 
     let result = db

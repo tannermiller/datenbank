@@ -2,7 +2,7 @@ use super::cache::Page;
 use super::row::Row;
 use super::Error;
 
-mod encode;
+pub(crate) mod encode;
 
 // This represents a single node in the B+ Tree, it contains the metadata of the node as well as
 // the node body itself.

@@ -6,7 +6,7 @@ use row::Row;
 
 pub mod cache;
 mod encode;
-mod node;
+pub(crate) mod node;
 pub(crate) mod row;
 
 pub use encode::decode;
@@ -62,10 +62,13 @@ impl<S: TablePageStore> BTree<S> {
     // Insert the row according to the key specificed by the btree schema. Returns the number of
     // rows affected. We currently only allow inserting fully specified rows so these must already
     // be put in order via schema.put_columns_in_order().
-    pub fn insert(&mut self, values: Vec<Vec<Column>>) -> Result<usize, Error> {
+    pub fn insert(&mut self, values: Vec<Vec<Column>>) -> Result<(usize, bool), Error> {
+        let mut changed_root = false;
+
         // first of all, handle an empty tree.
-        let root_id = match self.root {
+        let mut root_id = match self.root {
             None => {
+                changed_root = true;
                 let root_id = self.store.allocate()?;
                 self.root = Some(root_id);
 
@@ -79,17 +82,33 @@ impl<S: TablePageStore> BTree<S> {
 
         let mut count_affected = 0;
         for value in values {
+            // process the row to ensure it will fit in the leaf node, and split out any overflow
+            // and store those in the data cache.
             let row = row::process_columns(self.store.usable_page_size(), value)?
                 .finalize(&mut self.data_cache)?;
 
-            self.insert_row(root_id, row)?;
+            if let Some(new_root_id) = self.insert_row(root_id, row)? {
+                // if we split the root node then we need set the root id for the next iteration to
+                // be this new_root_id.
+                root_id = new_root_id;
+            }
 
             count_affected += 1;
         }
 
+        // TODO: Should this commit be here, at the tree level? or should it be at the table level?
+        // or should it be even higher than that?
+        // We'll probably share the node_cache across all btrees/tables/indices so we can probably
+        // just cache that once.
+        // we're writing the table header up a level, so we should probably write there too
         self.commit()?;
 
-        Ok(count_affected)
+        if root_id != self.root.unwrap() {
+            changed_root = true;
+            self.root = Some(root_id);
+        };
+
+        Ok((count_affected, changed_root))
     }
 
     // find the leaf that either contains a key or should be the leaf into which the key would be
@@ -125,7 +144,7 @@ impl<S: TablePageStore> BTree<S> {
         }
     }
 
-    fn insert_row(&mut self, root_id: usize, row: Row) -> Result<(), Error> {
+    fn insert_row(&mut self, root_id: usize, row: Row) -> Result<Option<usize>, Error> {
         // The insert algo goes like:
         //   * Search down the tree and find the node id of the leaf we need to insert the row
         //     into.
@@ -146,7 +165,7 @@ impl<S: TablePageStore> BTree<S> {
 
         let body = match row_outcome {
             Some(body) => body,
-            None => return Ok(()), // nothing more to do if we didn't split the leaf
+            None => return Ok(None), // nothing more to do if we didn't split the leaf
         };
 
         // We only get past this point if we've split the leaf node and need to insert the new
@@ -184,7 +203,7 @@ impl<S: TablePageStore> BTree<S> {
 
             let body = match child_outcome {
                 Some(body) => body,
-                None => return Ok(()), // didn't split, we're done inserting
+                None => return Ok(None), // didn't split, we're done inserting
             };
 
             // update left_child and new_child_id and so that the next loop picks up this value and
@@ -213,7 +232,7 @@ impl<S: TablePageStore> BTree<S> {
         };
         self.node_cache.put(new_root_id, new_root)?;
 
-        Ok(())
+        Ok(Some(new_root_id))
     }
 
     fn commit(&mut self) -> Result<(), Error> {
@@ -238,7 +257,7 @@ mod test {
     use crate::pagestore::Memory;
     use crate::schema::ColumnType;
 
-    fn leaf_node(id: usize, order: usize, schema: Schema, row_data: Vec<RowCol>) -> Node {
+    fn leaf_node(id: usize, order: usize, row_data: Vec<RowCol>) -> Node {
         Node {
             id,
             order,
@@ -274,10 +293,7 @@ mod test {
 
         let root_id = node_cache.allocate().unwrap();
         node_cache
-            .put(
-                root_id,
-                leaf_node(root_id, 10, schema.clone(), vec![RowCol::Int(1)]),
-            )
+            .put(root_id, leaf_node(root_id, 10, vec![RowCol::Int(1)]))
             .unwrap();
 
         let mut btree = BTree {
@@ -315,23 +331,13 @@ mod test {
         node_cache
             .put(
                 left_id,
-                leaf_node(
-                    left_id,
-                    10,
-                    schema.clone(),
-                    vec![RowCol::Int(1), RowCol::Int(7)],
-                ),
+                leaf_node(left_id, 10, vec![RowCol::Int(1), RowCol::Int(7)]),
             )
             .unwrap();
         node_cache
             .put(
                 right_id,
-                leaf_node(
-                    right_id,
-                    10,
-                    schema.clone(),
-                    vec![RowCol::Int(10), RowCol::Int(15)],
-                ),
+                leaf_node(right_id, 10, vec![RowCol::Int(10), RowCol::Int(15)]),
             )
             .unwrap();
 

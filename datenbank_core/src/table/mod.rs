@@ -81,12 +81,21 @@ impl<B: TablePageStoreBuilder> Table<B> {
         // every column is present in our inserted columns.
         let values_in_order = self.schema.put_columns_in_order(columns, values)?;
 
-        self.tree.insert(values_in_order).map_err(Into::into)
+        let (rows_affected, root_updated) = self.tree.insert(values_in_order)?;
+
+        if root_updated {
+            self.store
+                .put(0, header::encode(&self.name, &self.schema, &self.tree))?;
+        }
+
+        Ok(rows_affected)
     }
 }
 
 #[cfg(test)]
 mod test {
+    use super::btree::node::encode::decode_node;
+    use super::btree::node::NodeBody;
     use super::*;
     use crate::pagestore::MemoryBuilder;
     use crate::schema::{ColumnType, Schema};
@@ -135,5 +144,49 @@ mod test {
         let loaded_table = Table::load(&name, store_builder.clone()).unwrap().unwrap();
         assert_eq!(name, loaded_table.name);
         assert_eq!(schema, loaded_table.schema);
+    }
+
+    #[test]
+    fn test_insert() {
+        let name = "inserting_is_awesome".to_string();
+        let schema = Schema::new(vec![
+            ("zero".into(), ColumnType::Int),
+            ("one".into(), ColumnType::VarChar(10)),
+            ("infinity".into(), ColumnType::Bool),
+        ])
+        .unwrap();
+        let mut store_builder = MemoryBuilder::new(1024 * 64);
+
+        let mut table = Table::create(name.clone(), schema.clone(), store_builder.clone()).unwrap();
+
+        let rows_affected = table
+            .insert(
+                &["zero", "one", "infinity"],
+                vec![vec![
+                    Column::Int(7),
+                    Column::VarChar("hola".to_string()),
+                    Column::Bool(false),
+                ]],
+            )
+            .unwrap();
+        assert_eq!(1, rows_affected);
+
+        let store = store_builder.build(&name).unwrap();
+        let root_id = {
+            let table_header_page = store.get(0).unwrap();
+            let (_, _, decoded_btree) = header::decode(&table_header_page, store.clone()).unwrap();
+            decoded_btree.root.unwrap()
+        };
+
+        let root_node_bytes = store.get(root_id).unwrap();
+        let root_node = decode_node(&root_node_bytes).unwrap();
+        let leaf = match root_node.body {
+            NodeBody::Internal(_) => panic!("got internal root node"),
+            NodeBody::Leaf(l) => l,
+        };
+
+        assert!(leaf.right_sibling.is_none());
+        assert_eq!(1, leaf.rows.len());
+        assert_eq!(3, leaf.rows[0].body.len());
     }
 }
