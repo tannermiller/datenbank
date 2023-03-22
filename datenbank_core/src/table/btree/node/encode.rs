@@ -3,11 +3,10 @@ use std::io::Write;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::combinator::rest;
-use nom::error::{make_error, ErrorKind};
 use nom::multi::{length_count, length_value};
 use nom::number::complete::be_u32;
 use nom::sequence::pair;
-use nom::{Err as NomErr, IResult};
+use nom::IResult;
 
 use super::super::row::encode::{decode_row, encode_row};
 use super::super::Error;
@@ -95,11 +94,8 @@ fn decode_internal(input: &[u8]) -> IResult<&[u8], NodeBody> {
     let (input, bks) = length_count(be_u32, length_value(be_u32, rest))(input)?;
     let boundary_keys = bks
         .into_iter()
-        .map(|v| {
-            String::from_utf8(v.to_vec())
-                .map_err(|_| NomErr::Failure(make_error(input, ErrorKind::Verify)))
-        })
-        .collect::<Result<Vec<String>, _>>()?;
+        .map(|v| v.to_vec())
+        .collect::<Vec<Vec<u8>>>();
 
     let (input, children) = length_count(be_u32, be_u32)(input)?;
     let children = children.into_iter().map(|c| c as usize).collect();
@@ -157,11 +153,10 @@ fn encode_internal(
         .expect("can't fail writing to vec");
 
     for k in boundary_keys {
-        let kb = k.as_bytes();
         bytes
-            .write_all(&(kb.len() as u32).to_be_bytes())
+            .write_all(&(k.len() as u32).to_be_bytes())
             .expect("can't fail writing to vec");
-        bytes.write_all(kb).expect("can't fail writing to vec");
+        bytes.write_all(&k).expect("can't fail writing to vec");
     }
 
     bytes
@@ -202,7 +197,7 @@ mod test {
                         RowCol::Int(7),
                         RowCol::Bool(true),
                         RowCol::VarChar(RowVarChar {
-                            inline: "Hello, World!".to_string(),
+                            inline: b"Hello, World!".to_vec(),
                             next_page: Some(11),
                         }),
                     ],
@@ -223,7 +218,7 @@ mod test {
             id: 7,
             order: 10,
             body: NodeBody::Internal(Internal {
-                boundary_keys: vec!["hello".to_string(), "world".to_string()],
+                boundary_keys: vec![b"hello".to_vec(), b"world".to_vec()],
                 children: vec![5, 7, 11],
             }),
         };

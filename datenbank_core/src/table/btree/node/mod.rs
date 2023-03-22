@@ -48,20 +48,11 @@ pub(crate) enum NodeBody {
     Leaf(Leaf),
 }
 
-impl NodeBody {
-    pub(crate) fn left_child(&self) -> String {
-        match self {
-            NodeBody::Leaf(Leaf { rows, .. }) => rows[0].key(),
-            NodeBody::Internal(Internal { children, .. }) => children[0].to_string(),
-        }
-    }
-}
-
 // Houses the internal-node specific fields for a node. The boundary_keys will always have a length
 // one less than the children as they come from the first child of each non-first child.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Internal {
-    pub(crate) boundary_keys: Vec<String>, // TODO: should these be Vec<u8>?
+    pub(crate) boundary_keys: Vec<Vec<u8>>,
     pub(crate) children: Vec<usize>,
 }
 
@@ -72,7 +63,7 @@ impl Internal {
         &mut self,
         order: usize,
         child_id: usize,
-        child_key: String,
+        child_key: Vec<u8>,
     ) -> Result<Option<NodeBody>, Error> {
         if self.children.len() + 1 < order {
             match self.boundary_keys.binary_search(&child_key) {

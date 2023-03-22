@@ -3,11 +3,10 @@ use std::io::Write;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::combinator::{rest, value};
-use nom::error::{make_error, ErrorKind};
 use nom::multi::{length_count, length_value};
 use nom::number::complete::{be_i32, be_u16, be_u32};
 use nom::sequence::pair;
-use nom::{Err as NomErr, IResult};
+use nom::IResult;
 
 use super::{Row, RowCol, RowVarChar};
 
@@ -30,9 +29,7 @@ pub(crate) fn encode_row(row: &Row) -> Vec<u8> {
                     .expect("can't fail writing to vec");
 
                 // and then write the string data
-                bytes
-                    .write_all(inline.as_bytes())
-                    .expect("can't fail writing to vec");
+                bytes.write_all(inline).expect("can't fail writing to vec");
 
                 // finally write out the next page, or 0 if no next page
                 let next_page = match next_page {
@@ -78,11 +75,7 @@ pub(crate) fn decode_row(input: &[u8]) -> IResult<&[u8], Row> {
 }
 
 fn decode_varchar(input: &[u8]) -> IResult<&[u8], RowCol> {
-    let (input, val) = length_value(be_u16, rest)(input)?;
-    let inline = match String::from_utf8(val.to_vec()) {
-        Ok(inline) => inline,
-        Err(_) => return Err(NomErr::Failure(make_error(input, ErrorKind::Verify))),
-    };
+    let (input, inline) = length_value(be_u16, rest)(input)?;
 
     let (input, next_page) = be_u32(input)?;
     let next_page = if next_page == 0 {
@@ -91,7 +84,13 @@ fn decode_varchar(input: &[u8]) -> IResult<&[u8], RowCol> {
         Some(next_page as usize)
     };
 
-    Ok((input, RowCol::VarChar(RowVarChar { inline, next_page })))
+    Ok((
+        input,
+        RowCol::VarChar(RowVarChar {
+            inline: inline.to_vec(),
+            next_page,
+        }),
+    ))
 }
 
 fn decode_int(input: &[u8]) -> IResult<&[u8], RowCol> {
@@ -116,11 +115,11 @@ mod test {
                 RowCol::Int(7),
                 RowCol::Bool(true),
                 RowCol::VarChar(RowVarChar {
-                    inline: "Hello, World!".to_string(),
+                    inline: b"Hello, World!".to_vec(),
                     next_page: Some(11),
                 }),
                 RowCol::VarChar(RowVarChar {
-                    inline: "I'm different".to_string(),
+                    inline: b"I'm different".to_vec(),
                     next_page: None,
                 }),
                 RowCol::Bool(false),

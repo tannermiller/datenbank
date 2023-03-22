@@ -25,29 +25,32 @@ pub(crate) enum RowCol {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RowVarChar {
-    pub(crate) inline: String,
+    pub(crate) inline: Vec<u8>,
     pub(crate) next_page: Option<usize>,
 }
 
 impl Row {
     // generate a key string that represents the row
-    pub(crate) fn key(&self) -> String {
-        let mut parts = Vec::with_capacity(self.body.len());
+    pub(crate) fn key(&self) -> Vec<u8> {
+        let mut key = Vec::with_capacity(self.body.len());
 
         // this is probably not the most efficient way to do this
         for col in &self.body {
             match col {
-                RowCol::Int(i) => parts.push(i.to_string()),
-                RowCol::Bool(b) => parts.push(if *b { 't' } else { 'f' }.to_string()),
+                RowCol::Int(i) => key.extend(i.to_be_bytes()),
+                RowCol::Bool(b) => key.push(if *b { 1 } else { 0 }),
                 RowCol::VarChar(vc) => {
-                    parts.push(String::from_iter(
-                        vc.inline.chars().take(MAX_KEY_VAR_CHAR_LEN),
-                    ));
+                    key.extend(&vc.inline[..vc.inline.len().min(MAX_KEY_VAR_CHAR_LEN)]);
                 }
             }
+
+            // insert a separator _ between values, the last one will be removed before we return
+            key.push(b'_');
         }
 
-        parts.join("_")
+        // pop off the last _ that was inserted
+        key.pop();
+        key
     }
 }
 
@@ -147,8 +150,6 @@ pub(crate) fn process_columns(page_size: usize, cols: Vec<Column>) -> Result<Pro
                     (bs, None)
                 };
 
-                let inline =
-                    String::from_utf8(inline).map_err(|e| Error::InvalidColumn(e.to_string()))?;
                 Ok((
                     RowCol::VarChar(RowVarChar {
                         inline,
@@ -194,7 +195,7 @@ mod test {
                     (RowCol::Bool(true), None),
                     (
                         RowCol::VarChar(RowVarChar {
-                            inline: "0123456789".to_string(),
+                            inline: b"0123456789".to_vec(),
                             next_page: None,
                         }),
                         None,
@@ -220,7 +221,7 @@ mod test {
                     (RowCol::Bool(true), None),
                     (
                         RowCol::VarChar(RowVarChar {
-                            inline: base_str,
+                            inline: base_str.as_bytes().to_vec(),
                             next_page: None,
                         }),
                         Some(vec![
@@ -246,7 +247,7 @@ mod test {
                 (RowCol::Bool(true), None),
                 (
                     RowCol::VarChar(RowVarChar {
-                        inline: base_str.clone(),
+                        inline: base_str.as_bytes().to_vec(),
                         next_page: None,
                     }),
                     Some(vec![
@@ -267,7 +268,7 @@ mod test {
                     RowCol::Int(7),
                     RowCol::Bool(true),
                     RowCol::VarChar(RowVarChar {
-                        inline: base_str,
+                        inline: base_str.as_bytes().to_vec(),
                         next_page: Some(1),
                     }),
                 ],

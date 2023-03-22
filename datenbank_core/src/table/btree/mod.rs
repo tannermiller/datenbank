@@ -1,7 +1,7 @@
 use crate::pagestore::{Error as PageError, TablePageStore};
 use crate::schema::{Column, Schema};
 use cache::Cache;
-use node::{Internal, Node, NodeBody};
+use node::{Internal, Leaf, Node, NodeBody};
 use row::Row;
 
 pub mod cache;
@@ -15,8 +15,8 @@ pub use encode::decode;
 pub enum Error {
     #[error("io error attempting operation")]
     Io(#[from] PageError),
-    #[error("attempted to insert duplicate entry with key {0}")]
-    DuplicateEntry(String),
+    #[error("attempted to insert duplicate entry with key {0:?}")]
+    DuplicateEntry(Vec<u8>),
     #[error("invalid column: {0}")]
     InvalidColumn(String),
     #[error("empty table")]
@@ -113,7 +113,7 @@ impl<S: TablePageStore> BTree<S> {
 
     // find the leaf that either contains a key or should be the leaf into which the key would be
     // inserted
-    fn find_containing_leaf(&mut self, key_id: &String) -> Result<(usize, Vec<usize>), Error> {
+    fn find_containing_leaf(&mut self, key_id: &Vec<u8>) -> Result<(usize, Vec<usize>), Error> {
         let mut node_id = match self.root {
             Some(root_id) => root_id,
             None => return Err(Error::EmptyTable),
@@ -169,9 +169,12 @@ impl<S: TablePageStore> BTree<S> {
         };
 
         // We only get past this point if we've split the leaf node and need to insert the new
-        // sibling. left_child and the new_child_id will be the vars that we use to communicate up
-        // each level of the internal nodes to indicate a newly inserted split node.
-        let mut left_child = body.left_child();
+        // sibling. new_child_id will be the var that we use to communicate up each level of the
+        // internal nodes to indicate a newly inserted split node.
+        let left_child = match &body {
+            NodeBody::Leaf(Leaf { rows, .. }) => rows[0].key(),
+            _ => unreachable!(), // We know this is a leaf since we just split a leaf
+        };
         let mut new_child_id = self.node_cache.allocate()?;
 
         let split_node = Node {
@@ -199,16 +202,16 @@ impl<S: TablePageStore> BTree<S> {
                 NodeBody::Leaf(_) => unreachable!(),
             };
 
-            let child_outcome = internal_node.insert_child(self.order, new_child_id, left_child)?;
+            let child_outcome =
+                internal_node.insert_child(self.order, new_child_id, left_child.clone())?;
 
             let body = match child_outcome {
                 Some(body) => body,
                 None => return Ok(None), // didn't split, we're done inserting
             };
 
-            // update left_child and new_child_id and so that the next loop picks up this value and
-            // inserts into that internal node
-            left_child = body.left_child();
+            // update new_child_id and so that the next loop picks up this value and inserts into
+            // that internal node
             new_child_id = self.node_cache.allocate()?;
 
             let split_node = Node {
@@ -271,7 +274,7 @@ mod test {
     fn internal_node(
         id: usize,
         order: usize,
-        boundary_keys: Vec<String>,
+        boundary_keys: Vec<Vec<u8>>,
         children: Vec<usize>,
     ) -> Node {
         Node {
@@ -306,7 +309,7 @@ mod test {
             store,
         };
 
-        let (leaf_id, parents) = btree.find_containing_leaf(&"1".to_string()).unwrap();
+        let (leaf_id, parents) = btree.find_containing_leaf(&b"1".to_vec()).unwrap();
 
         assert_eq!(root_id, leaf_id);
         assert!(parents.is_empty());
@@ -325,7 +328,7 @@ mod test {
         node_cache
             .put(
                 root_id,
-                internal_node(root_id, 10, vec!["10".to_string()], vec![left_id, right_id]),
+                internal_node(root_id, 10, vec![b"10".to_vec()], vec![left_id, right_id]),
             )
             .unwrap();
         node_cache
@@ -351,7 +354,7 @@ mod test {
             store,
         };
 
-        let (leaf_id, parents) = btree.find_containing_leaf(&"15".to_string()).unwrap();
+        let (leaf_id, parents) = btree.find_containing_leaf(&b"15".to_vec()).unwrap();
 
         assert_eq!(right_id, leaf_id);
         assert_eq!(vec![root_id], parents);

@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use crate::parser::Literal;
-use crate::table::btree::row::{RowCol, RowVarChar};
 
 mod encode;
 
