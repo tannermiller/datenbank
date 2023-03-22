@@ -189,4 +189,47 @@ mod test {
         assert_eq!(1, leaf.rows.len());
         assert_eq!(3, leaf.rows[0].body.len());
     }
+
+    #[test]
+    fn test_big_inserts() {
+        let name = "big_inserts".to_string();
+        let schema = Schema::new(vec![
+            ("one".into(), ColumnType::Int),
+            ("two".into(), ColumnType::VarChar(512)),
+            ("three".into(), ColumnType::Bool),
+        ])
+        .unwrap();
+        let mut store_builder = MemoryBuilder::new(1024 * 16);
+        let mut table = Table::create(name.clone(), schema.clone(), store_builder.clone()).unwrap();
+
+        let mut rows = Vec::with_capacity(10_000);
+        for i in 0..10_000 {
+            rows.push(vec![
+                Column::Int(i),
+                Column::VarChar(i.to_string().repeat(100)),
+                Column::Bool(i % 2 == 0),
+            ]);
+        }
+
+        let rows_affected = table.insert(&["one", "two", "three"], rows).unwrap();
+
+        assert_eq!(10_000, rows_affected);
+
+        let store = store_builder.build(&name).unwrap();
+        let root_id = {
+            let table_header_page = store.get(0).unwrap();
+            let (_, _, decoded_btree) = header::decode(&table_header_page, store.clone()).unwrap();
+            decoded_btree.root.unwrap()
+        };
+
+        let root_node_bytes = store.get(root_id).unwrap();
+        let root_node = decode_node(&root_node_bytes).unwrap();
+
+        let internal = match root_node.body {
+            NodeBody::Internal(i) => i,
+            NodeBody::Leaf(_) => panic!("got leaf root node"),
+        };
+
+        assert!(!internal.children.is_empty());
+    }
 }
