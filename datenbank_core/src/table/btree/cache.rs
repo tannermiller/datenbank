@@ -143,7 +143,7 @@ mod test {
             .unwrap();
         assert!(!cache.allocated.contains(&first_page));
 
-        let store = store_builder.build("test").unwrap();
+        let mut store = store_builder.build("test").unwrap();
         assert_eq!("Hello, World!".as_bytes(), cache.get(first_page).unwrap());
         assert_eq!(Vec::<u8>::new(), store.get(first_page).unwrap());
 

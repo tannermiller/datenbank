@@ -28,7 +28,7 @@ pub trait TablePageStore: std::fmt::Debug {
 
     // Get a page given a page id. The page id must be one that has already been allocated, if not
     // an Err(Error::UnallocatedPage) error will be returned.
-    fn get(&self, page_id: usize) -> Result<Vec<u8>, Error>;
+    fn get(&mut self, page_id: usize) -> Result<Vec<u8>, Error>;
 
     // Write a page's payload to persistence. An Err(Error::PayloadTooLong) will be returned if the
     // payload.

@@ -37,7 +37,7 @@ impl Inner {
         self.page_size
     }
 
-    fn get(&self, page_id: usize) -> Result<Vec<u8>, Error> {
+    fn get(&mut self, page_id: usize) -> Result<Vec<u8>, Error> {
         match self.store.get(&page_id) {
             Some(payload) => Ok(payload.clone()),
             // 0th page is auto "allocated" and anything thats under the last page has probably
@@ -95,8 +95,8 @@ impl TablePageStore for Memory {
         self.inner.borrow().usable_page_size()
     }
 
-    fn get(&self, page_id: usize) -> Result<Vec<u8>, Error> {
-        self.inner.borrow().get(page_id)
+    fn get(&mut self, page_id: usize) -> Result<Vec<u8>, Error> {
+        self.inner.borrow_mut().get(page_id)
     }
 
     fn put(&mut self, page_id: usize, payload: Vec<u8>) -> Result<(), Error> {

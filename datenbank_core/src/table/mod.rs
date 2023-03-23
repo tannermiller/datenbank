@@ -62,7 +62,7 @@ impl<S: TablePageStore> Table<S> {
         name: &str,
         store_builder: &mut SB,
     ) -> Result<Option<Table<S>>, Error> {
-        let store = store_builder.build(name)?;
+        let mut store = store_builder.build(name)?;
         let header_page = store.get(0)?;
         if header_page.is_empty() {
             return Ok(None);
@@ -124,7 +124,7 @@ mod test {
             assert_eq!(&name, &table.name);
             assert_eq!(&schema, &table.schema);
 
-            let store = store_builder.build(&name).unwrap();
+            let mut store = store_builder.build(&name).unwrap();
             let table_header_page = store.get(0).unwrap();
             assert_eq!(
                 vec![
@@ -178,7 +178,7 @@ mod test {
             .unwrap();
         assert_eq!(1, rows_affected);
 
-        let store = store_builder.build(&name).unwrap();
+        let mut store = store_builder.build(&name).unwrap();
         let root_id = {
             let table_header_page = store.get(0).unwrap();
             let (_, _, decoded_btree) =
@@ -223,7 +223,7 @@ mod test {
 
         assert_eq!(10_000, rows_affected);
 
-        let store = store_builder.build(&name).unwrap();
+        let mut store = store_builder.build(&name).unwrap();
         let root_id = {
             let table_header_page = store.get(0).unwrap();
             let (_, _, decoded_btree) =
