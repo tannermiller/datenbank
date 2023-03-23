@@ -39,7 +39,7 @@ pub trait TablePageStore: std::fmt::Debug {
 }
 
 // TablePageStoreBuilder is responsible for constructing TablePageStores for a given table.
-pub trait TablePageStoreBuilder: Clone + std::fmt::Debug {
+pub trait TablePageStoreBuilder: std::fmt::Debug {
     type TablePageStore: TablePageStore;
 
     // Build may either create an entirely new instance of a TablePageStore, or return a clone of

@@ -131,7 +131,7 @@ impl BuilderInner {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct MemoryBuilder {
     inner: Rc<RefCell<BuilderInner>>,
 }
