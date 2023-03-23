@@ -155,10 +155,6 @@ impl Schema {
         }) + 4
     }
 
-    pub fn columns(&self) -> &[(String, ColumnType)] {
-        &self.columns
-    }
-
     pub fn put_columns_in_order(
         &self,
         column_order: &[&str],

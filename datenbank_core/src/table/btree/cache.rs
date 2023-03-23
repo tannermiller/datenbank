@@ -93,10 +93,6 @@ impl<S: TablePageStore, P: Page> Cache<S, P> {
             .ok_or(Error::Io(PageError::UnallocatedPage(page_id))) // shouldn't happen
     }
 
-    pub(crate) fn page_size(&self) -> usize {
-        self.store.usable_page_size()
-    }
-
     pub(crate) fn commit(&mut self) -> Result<(), Error> {
         let old_cache = mem::take(&mut self.cache);
 

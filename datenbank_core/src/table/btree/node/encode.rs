@@ -156,7 +156,7 @@ fn encode_internal(
         bytes
             .write_all(&(k.len() as u32).to_be_bytes())
             .expect("can't fail writing to vec");
-        bytes.write_all(&k).expect("can't fail writing to vec");
+        bytes.write_all(k).expect("can't fail writing to vec");
     }
 
     bytes
