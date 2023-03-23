@@ -1,11 +1,14 @@
-use std::fs::File as StdFile;
+use std::fs;
 use std::path::PathBuf;
 
 use super::{Error, TablePageStore, TablePageStoreBuilder};
 
-#[derive(Clone, Debug)]
+// TODO: Do we need a page allocated per file that manages everything? free list, etc?
+
+#[derive(Debug)]
 pub struct File {
-    //file: StdFile,
+    page_size: u32,
+    file: fs::File,
 }
 
 impl TablePageStore for File {
@@ -14,7 +17,9 @@ impl TablePageStore for File {
     }
 
     fn usable_page_size(&self) -> usize {
-        todo!()
+        // we need 4 bytes per page to store the length of the actual page data, the rest of the
+        // page is zeroed out on disk
+        self.page_size - 4 as usize
     }
 
     fn get(&self, page_id: usize) -> Result<Vec<u8>, Error> {
@@ -30,8 +35,9 @@ impl TablePageStore for File {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct FileBuilder {
+    page_size: u32,
     directory: PathBuf,
 }
 
@@ -40,20 +46,23 @@ impl TablePageStoreBuilder for FileBuilder {
 
     fn build(&mut self, table_name: &str) -> Result<Self::TablePageStore, Error> {
         let file_path = self.directory.join(table_name).with_extension("dbdb");
-        let table_file = StdFile::options()
+        let file = fs::File::options()
             .read(true)
             .write(true)
             .create(true)
             .open(file_path)
             .map_err(|e| Error::Io(e.to_string()))?;
-        todo!()
+        Ok(File {
+            file,
+            page_size: self.page_size,
+        })
     }
 }
 
 impl FileBuilder {
     // Get a new FileBuilder which will store the tables. If the path is not a directory, then the
     // parent directory of the file will be used.
-    pub fn new(directory_path: impl Into<PathBuf>) -> Self {
+    pub fn new(directory_path: impl Into<PathBuf>, page_size: u32) -> Self {
         let path = directory_path.into();
         let directory = if path.is_file() {
             path.parent()
@@ -63,6 +72,9 @@ impl FileBuilder {
             path
         };
 
-        FileBuilder { directory }
+        FileBuilder {
+            directory,
+            page_size,
+        }
     }
 }
