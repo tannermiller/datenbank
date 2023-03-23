@@ -1,5 +1,7 @@
+mod file;
 mod memory;
 
+pub use file::{File, FileBuilder};
 pub use memory::{Memory, MemoryBuilder};
 
 #[derive(Debug, thiserror::Error, PartialEq)]
