@@ -123,14 +123,14 @@ impl Page for Vec<u8> {
 
 #[cfg(test)]
 mod test {
-    use crate::pagestore::Memory;
+    use crate::pagestore::{Memory, MemoryBuilder, TablePageStoreBuilder};
 
     use super::*;
 
     #[test]
     fn test_cache() {
-        let store = Memory::new(64 * 1024);
-        let mut cache: Cache<Memory, Vec<u8>> = Cache::new(store.clone());
+        let mut store_builder = MemoryBuilder::new(64 * 1024);
+        let mut cache: Cache<Memory, Vec<u8>> = Cache::new(store_builder.build("test").unwrap());
 
         assert!(cache.get(1).is_err());
 
@@ -143,6 +143,7 @@ mod test {
             .unwrap();
         assert!(!cache.allocated.contains(&first_page));
 
+        let store = store_builder.build("test").unwrap();
         assert_eq!("Hello, World!".as_bytes(), cache.get(first_page).unwrap());
         assert_eq!(Vec::<u8>::new(), store.get(first_page).unwrap());
 

@@ -33,6 +33,6 @@ impl<B: TablePageStoreBuilder> Database<B> {
     // Execute the provided SQL string against the database.
     pub fn exec(&mut self, input: &str) -> Result<ExecResult, Error> {
         let input = parse(input)?;
-        execute(self.builder.clone(), input).map_err(Into::into)
+        execute(&mut self.builder, input).map_err(Into::into)
     }
 }

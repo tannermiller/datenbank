@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use super::{Error, TablePageStore, TablePageStoreBuilder};
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Memory {
     inner: Rc<RefCell<Inner>>,
 }
@@ -117,11 +117,15 @@ struct BuilderInner {
 impl BuilderInner {
     fn build(&mut self, table_name: &str) -> Result<Memory, Error> {
         if let Some(page_store) = self.tables.get(table_name) {
-            return Ok(page_store.clone());
+            return Ok(Memory {
+                inner: page_store.inner.clone(),
+            });
         }
 
         let page_store = Memory::new(self.page_size);
-        let ret_page_store = page_store.clone();
+        let ret_page_store = Memory {
+            inner: page_store.inner.clone(),
+        };
         self.tables.insert(table_name.to_string(), page_store);
         Ok(ret_page_store)
     }

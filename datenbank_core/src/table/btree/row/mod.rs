@@ -167,7 +167,7 @@ pub(crate) fn process_columns(page_size: usize, cols: Vec<Column>) -> Result<Pro
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::pagestore::Memory;
+    use crate::pagestore::{MemoryBuilder, TablePageStoreBuilder};
 
     #[test]
     fn test_process_columns() {
@@ -238,8 +238,8 @@ mod test {
 
     #[test]
     fn test_processed_rows_finalize() {
-        let mut store = Memory::new(64);
-        let mut data_cache = Cache::new(store.clone());
+        let mut store_builder = MemoryBuilder::new(64);
+        let mut data_cache = Cache::new(store_builder.build("test").unwrap());
         let base_str = "1".repeat(MAX_INLINE_VAR_LEN_COL_SIZE);
         let pr = ProcessedRow {
             columns: vec![
@@ -277,6 +277,7 @@ mod test {
         );
 
         // ensure that the 4 pages were allocated by seeing the next allocated one is 5
+        let mut store = store_builder.build("test").unwrap();
         assert_eq!(5, store.allocate().unwrap());
         assert_eq!(
             &vec![1u8, 0, 0, 0, 2, 48, 49, 50],

@@ -20,7 +20,7 @@ pub struct ExecResult {
 }
 
 pub fn execute<B: TablePageStoreBuilder>(
-    store_builder: B,
+    store_builder: &mut B,
     input: Input,
 ) -> Result<ExecResult, Error> {
     match input {
@@ -34,7 +34,7 @@ pub fn execute<B: TablePageStoreBuilder>(
 }
 
 fn create_table<B: TablePageStoreBuilder>(
-    store_builder: B,
+    store_builder: &mut B,
     table_name: &str,
     schema: Vec<ColumnSchema>,
 ) -> Result<ExecResult, Error> {
@@ -60,7 +60,7 @@ fn parser_schema_to_table_schema(parser_schema: Vec<ColumnSchema>) -> Result<Sch
 }
 
 fn insert_into<B: TablePageStoreBuilder>(
-    store_builder: B,
+    store_builder: &mut B,
     table_name: &str,
     columns: Vec<&str>,
     values: Vec<Vec<Literal>>,

@@ -26,23 +26,27 @@ pub enum Error {
 // A Table is responsible for the management of everything pertaining to a single database table's
 // data. It manages the table btree, any indices as well as the persistence of the table.
 #[derive(Debug)]
-pub struct Table<B: TablePageStoreBuilder> {
+pub struct Table<S: TablePageStore> {
     name: String,
     schema: Schema,
-    store: B::TablePageStore,
-    tree: BTree<B::TablePageStore>,
+    store: S,
+    tree: BTree<S>,
 }
 
-impl<B: TablePageStoreBuilder> Table<B> {
+impl<S: TablePageStore> Table<S> {
     // Create a new table, which is expected not to exist yet.
-    pub fn create(name: String, schema: Schema, mut store_builder: B) -> Result<Table<B>, Error> {
+    pub fn create<SB: TablePageStoreBuilder<TablePageStore = S>>(
+        name: String,
+        schema: Schema,
+        store_builder: &mut SB,
+    ) -> Result<Table<S>, Error> {
         if name.len() > 255 {
             return Err(Error::NameTooLong);
         }
 
         let mut store = store_builder.build(&name)?;
 
-        let tree = BTree::new(name.clone(), schema.clone(), store.clone())?;
+        let tree = BTree::new(name.clone(), schema.clone(), store_builder)?;
         store.put(0, header::encode(&name, &schema, &tree))?;
 
         Ok(Table {
@@ -54,14 +58,17 @@ impl<B: TablePageStoreBuilder> Table<B> {
     }
 
     // Load an extant table.
-    pub fn load(name: &str, mut store_builder: B) -> Result<Option<Table<B>>, Error> {
+    pub fn load<SB: TablePageStoreBuilder<TablePageStore = S>>(
+        name: &str,
+        store_builder: &mut SB,
+    ) -> Result<Option<Table<S>>, Error> {
         let store = store_builder.build(name)?;
         let header_page = store.get(0)?;
         if header_page.is_empty() {
             return Ok(None);
         }
 
-        let (name, schema, tree) = header::decode(&header_page, store.clone())?;
+        let (name, schema, tree) = header::decode(&header_page, store_builder)?;
 
         Ok(Some(Table {
             name,
@@ -112,7 +119,7 @@ mod test {
         let mut store_builder = MemoryBuilder::new(1024 * 64);
 
         {
-            let table = Table::create(name.clone(), schema.clone(), store_builder.clone()).unwrap();
+            let table = Table::create(name.clone(), schema.clone(), &mut store_builder).unwrap();
 
             assert_eq!(&name, &table.name);
             assert_eq!(&schema, &table.schema);
@@ -130,18 +137,18 @@ mod test {
             );
 
             let (decoded_name, decoded_schema, decoded_btree) =
-                header::decode(&table_header_page, store).unwrap();
+                header::decode(&table_header_page, &mut store_builder).unwrap();
             assert_eq!(name, decoded_name);
             assert_eq!(schema, decoded_schema);
             assert_eq!(table.tree.order, decoded_btree.order);
             assert_eq!(table.tree.root, decoded_btree.root);
         }
 
-        let load_result = Table::load("not_found", store_builder.clone());
+        let load_result = Table::load("not_found", &mut store_builder);
         assert!(load_result.is_ok());
         assert!(load_result.unwrap().is_none());
 
-        let loaded_table = Table::load(&name, store_builder.clone()).unwrap().unwrap();
+        let loaded_table = Table::load(&name, &mut store_builder).unwrap().unwrap();
         assert_eq!(name, loaded_table.name);
         assert_eq!(schema, loaded_table.schema);
     }
@@ -157,7 +164,7 @@ mod test {
         .unwrap();
         let mut store_builder = MemoryBuilder::new(1024 * 64);
 
-        let mut table = Table::create(name.clone(), schema.clone(), store_builder.clone()).unwrap();
+        let mut table = Table::create(name.clone(), schema.clone(), &mut store_builder).unwrap();
 
         let rows_affected = table
             .insert(
@@ -174,7 +181,8 @@ mod test {
         let store = store_builder.build(&name).unwrap();
         let root_id = {
             let table_header_page = store.get(0).unwrap();
-            let (_, _, decoded_btree) = header::decode(&table_header_page, store.clone()).unwrap();
+            let (_, _, decoded_btree) =
+                header::decode(&table_header_page, &mut store_builder).unwrap();
             decoded_btree.root.unwrap()
         };
 
@@ -200,7 +208,7 @@ mod test {
         ])
         .unwrap();
         let mut store_builder = MemoryBuilder::new(1024 * 16);
-        let mut table = Table::create(name.clone(), schema.clone(), store_builder.clone()).unwrap();
+        let mut table = Table::create(name.clone(), schema.clone(), &mut store_builder).unwrap();
 
         let mut rows = Vec::with_capacity(10_000);
         for i in 0..10_000 {
@@ -218,7 +226,8 @@ mod test {
         let store = store_builder.build(&name).unwrap();
         let root_id = {
             let table_header_page = store.get(0).unwrap();
-            let (_, _, decoded_btree) = header::decode(&table_header_page, store.clone()).unwrap();
+            let (_, _, decoded_btree) =
+                header::decode(&table_header_page, &mut store_builder).unwrap();
             decoded_btree.root.unwrap()
         };
 

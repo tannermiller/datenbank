@@ -9,7 +9,7 @@ use nom::{Err as NomErr, IResult};
 use super::btree::cache::Cache;
 use super::btree::{decode as decode_btree, BTree};
 use super::Error;
-use crate::pagestore::TablePageStore;
+use crate::pagestore::{TablePageStore, TablePageStoreBuilder};
 use crate::parser::identifier_bytes;
 use crate::schema::{decode as decode_schema, Schema};
 
@@ -53,9 +53,9 @@ pub fn encode<S: TablePageStore>(name: &str, schema: &Schema, tree: &BTree<S>) -
     header_bytes
 }
 
-pub fn decode<S: TablePageStore>(
+pub fn decode<S: TablePageStore, SB: TablePageStoreBuilder<TablePageStore = S>>(
     header_bytes: &[u8],
-    store: S,
+    store_builder: &mut SB,
 ) -> Result<(String, Schema, BTree<S>), Error> {
     let (_, (name, schema, order, root)) =
         decode_parse(header_bytes).map_err(|e| Error::DecodingError(e.to_string()))?;
@@ -64,9 +64,9 @@ pub fn decode<S: TablePageStore>(
         order,
         schema: schema.clone(),
         root,
-        node_cache: Cache::new(store.clone()),
-        data_cache: Cache::new(store.clone()),
-        store,
+        node_cache: Cache::new(store_builder.build(&name)?),
+        data_cache: Cache::new(store_builder.build(&name)?),
+        store: store_builder.build(&name)?,
     };
     Ok((name, schema, tree))
 }

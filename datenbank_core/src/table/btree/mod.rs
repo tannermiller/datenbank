@@ -1,4 +1,4 @@
-use crate::pagestore::{Error as PageError, TablePageStore};
+use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
 use crate::schema::{Column, Schema};
 use cache::Cache;
 use node::{Internal, Leaf, Node, NodeBody};
@@ -41,20 +41,25 @@ pub struct BTree<S: TablePageStore> {
 
 impl<S: TablePageStore> BTree<S> {
     // Build a brand new btree with no data in it.
-    pub fn new(name: String, schema: Schema, store: S) -> Result<BTree<S>, Error> {
+    pub fn new<SB: TablePageStoreBuilder<TablePageStore = S>>(
+        name: String,
+        schema: Schema,
+        store_builder: &mut SB,
+    ) -> Result<BTree<S>, Error> {
         // row size itself + 4 bytes for the body len
         let row_size = schema.max_inline_row_size() + 4;
 
         // 9 bytes of node-overhead + 4 bytes for # of rows + 4 bytes for right_sibling + row_body
+        let store = store_builder.build(&name)?;
         let order = (store.usable_page_size() - 17) / row_size;
 
         Ok(BTree {
-            name,
+            name: name.clone(),
             order,
             schema,
             root: None,
-            node_cache: Cache::new(store.clone()),
-            data_cache: Cache::new(store.clone()),
+            node_cache: Cache::new(store_builder.build(&name)?),
+            data_cache: Cache::new(store_builder.build(&name)?),
             store,
         })
     }
@@ -257,7 +262,7 @@ mod test {
     use super::node::Leaf;
     use super::row::RowCol;
     use super::*;
-    use crate::pagestore::Memory;
+    use crate::pagestore::MemoryBuilder;
     use crate::schema::ColumnType;
 
     fn leaf_node(id: usize, order: usize, row_data: Vec<RowCol>) -> Node {
@@ -290,9 +295,9 @@ mod test {
     #[test]
     fn test_find_containing_leaf_root_is_leaf() {
         let schema = Schema::new(vec![("foo".into(), ColumnType::Int)]).unwrap();
-        let store = Memory::new(64 * 1024);
-        let data_cache = Cache::new(store.clone());
-        let mut node_cache = Cache::new(store.clone());
+        let mut store_builder = MemoryBuilder::new(64 * 1024);
+        let data_cache = Cache::new(store_builder.build("test").unwrap());
+        let mut node_cache = Cache::new(store_builder.build("test").unwrap());
 
         let root_id = node_cache.allocate().unwrap();
         node_cache
@@ -306,7 +311,7 @@ mod test {
             root: Some(root_id),
             node_cache,
             data_cache,
-            store,
+            store: store_builder.build("test").unwrap(),
         };
 
         let (leaf_id, parents) = btree.find_containing_leaf(&b"1".to_vec()).unwrap();
@@ -318,9 +323,9 @@ mod test {
     #[test]
     fn test_find_containing_leaf_root_is_internal() {
         let schema = Schema::new(vec![("foo".into(), ColumnType::Int)]).unwrap();
-        let store = Memory::new(64 * 1024);
-        let data_cache = Cache::new(store.clone());
-        let mut node_cache = Cache::new(store.clone());
+        let mut store_builder = MemoryBuilder::new(64 * 1024);
+        let data_cache = Cache::new(store_builder.build("test").unwrap());
+        let mut node_cache = Cache::new(store_builder.build("test").unwrap());
 
         let root_id = node_cache.allocate().unwrap();
         let left_id = node_cache.allocate().unwrap();
@@ -351,7 +356,7 @@ mod test {
             root: Some(root_id),
             node_cache,
             data_cache,
-            store,
+            store: store_builder.build("test").unwrap(),
         };
 
         let (leaf_id, parents) = btree.find_containing_leaf(&b"15".to_vec()).unwrap();
