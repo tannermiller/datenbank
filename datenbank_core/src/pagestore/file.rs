@@ -72,6 +72,32 @@ impl TablePageStore for File {
     }
 
     fn put(&mut self, page_id: usize, payload: Vec<u8>) -> Result<(), Error> {
+        let start_position = page_id as u64 * (self.page_size as u64);
+
+        let total_size = self
+            .file
+            .seek(SeekFrom::End(0))
+            .map_err(|e| Error::Io(e.to_string()))?;
+
+        if total_size < start_position {
+            return Err(Error::UnallocatedPage(page_id));
+        }
+
+        self.file
+            .seek(SeekFrom::Start(start_position))
+            .map_err(|e| Error::Io(e.to_string()))?;
+
+        self.file
+            .write_all(&(payload.len() as u32).to_be_bytes())
+            .map_err(|e| Error::Io(e.to_string()))?;
+
+        self.file
+            .write_all(&payload)
+            .map_err(|e| Error::Io(e.to_string()))
+
+        let len_to_zero = self.page_size - (payload.len()+4);
+
+        // TODO: write out zeroes for the rest of the page
         todo!()
     }
 
