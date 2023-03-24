@@ -15,6 +15,9 @@ impl TablePageStore for File {
         // Seek to end, get final position, divide by page_size to get current page_count,
         // write out a new page of zeroes
 
+        // TODO: need to handle getting from the free list first and only allocating if nothing
+        // free
+
         let position = self
             .file
             .seek(SeekFrom::End(0))
@@ -71,15 +74,22 @@ impl TablePageStore for File {
         Ok(page_data)
     }
 
-    fn put(&mut self, page_id: usize, payload: Vec<u8>) -> Result<(), Error> {
+    fn put(&mut self, page_id: usize, mut payload: Vec<u8>) -> Result<(), Error> {
+        if payload.len() > self.usable_page_size() {
+            return Err(Error::PayloadTooLong(
+                payload.len(),
+                self.usable_page_size(),
+            ));
+        }
+
         let start_position = page_id as u64 * (self.page_size as u64);
 
-        let total_size = self
+        let file_len = self
             .file
             .seek(SeekFrom::End(0))
             .map_err(|e| Error::Io(e.to_string()))?;
 
-        if total_size < start_position {
+        if file_len < start_position {
             return Err(Error::UnallocatedPage(page_id));
         }
 
@@ -87,18 +97,20 @@ impl TablePageStore for File {
             .seek(SeekFrom::Start(start_position))
             .map_err(|e| Error::Io(e.to_string()))?;
 
+        // first write len of payload
         self.file
             .write_all(&(payload.len() as u32).to_be_bytes())
             .map_err(|e| Error::Io(e.to_string()))?;
 
+        // now extend the payload with zeroes out to the full size of a page so we overwrite
+        // any data that might be there before if this page has shrunk in size
+        if payload.len() < self.usable_page_size() {
+            payload.resize(self.usable_page_size(), 0);
+        }
+
         self.file
             .write_all(&payload)
             .map_err(|e| Error::Io(e.to_string()))
-
-        let len_to_zero = self.page_size - (payload.len()+4);
-
-        // TODO: write out zeroes for the rest of the page
-        todo!()
     }
 
     fn delete(&mut self, page_id: usize) -> Result<(), Error> {
@@ -187,6 +199,48 @@ mod test {
         assert_eq!(
             Err(Error::UnallocatedPage(next_page + 2)),
             store.get(next_page + 2)
+        );
+
+        store.put(0, b"some header data".to_vec()).unwrap();
+        store
+            .put(next_page, b"gonna put something here too".to_vec())
+            .unwrap();
+
+        assert_eq!(
+            Err(Error::UnallocatedPage(next_page + 2)),
+            store.put(next_page + 2, vec![1, 0]),
+        );
+
+        let page_data = store.get(0).unwrap();
+        assert_eq!(b"some header data".as_slice(), &page_data);
+
+        let page_data = store.get(next_page).unwrap();
+        assert_eq!(b"gonna put something here too".as_slice(), &page_data);
+
+        let another_page = store.allocate().unwrap();
+        assert_eq!(3, another_page);
+        store
+            .put(another_page, b"I'm hereeeeeeee".to_vec())
+            .unwrap();
+        let page_data = store.get(another_page).unwrap();
+        assert_eq!(b"I'm hereeeeeeee".as_slice(), &page_data);
+
+        // stick a full sized payload in the previous spot and ensure it doesn't bleed over
+        store
+            .put(next_page, b"f".repeat(store.usable_page_size()))
+            .unwrap();
+        let page_data = store.get(next_page).unwrap();
+        assert_eq!(b"f".repeat(store.usable_page_size()).as_slice(), &page_data);
+
+        let page_data = store.get(another_page).unwrap();
+        assert_eq!(b"I'm hereeeeeeee".as_slice(), &page_data);
+
+        assert_eq!(
+            Err(Error::PayloadTooLong(
+                store.usable_page_size() + 1,
+                store.usable_page_size()
+            )),
+            store.put(next_page, b"f".repeat(store.usable_page_size() + 1)),
         );
 
         let _ = fs::remove_file(db_file_path);
