@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 use super::{Error, TablePageStore, TablePageStoreBuilder};
@@ -22,7 +22,7 @@ impl TablePageStore for File {
 
         // this will give us the total written pages up to now, since the pages are 0-indexed this
         // will actually also be the returned index for the next page
-        let page_count = (position + 1) / self.page_size as u64;
+        let page_count = position / self.page_size as u64;
 
         self.file
             .write_all(&vec![0; self.page_size as usize])
@@ -37,8 +37,38 @@ impl TablePageStore for File {
         (self.page_size - 4) as usize
     }
 
-    fn get(&self, page_id: usize) -> Result<Vec<u8>, Error> {
-        todo!()
+    fn get(&mut self, page_id: usize) -> Result<Vec<u8>, Error> {
+        let start_position = page_id as u64 * (self.page_size as u64);
+
+        let total_size = self
+            .file
+            .seek(SeekFrom::End(0))
+            .map_err(|e| Error::Io(e.to_string()))?;
+
+        // if the total size of the file is less than the start_position then we're passed the end
+        // of the file and we haven't allocated it yet
+        if total_size < start_position {
+            return Err(Error::UnallocatedPage(page_id));
+        }
+
+        self.file
+            .seek(SeekFrom::Start(start_position))
+            .map_err(|e| Error::Io(e.to_string()))?;
+
+        // the first 4 bytes are the actual len of the page
+        let mut page_len_bytes = [0; 4];
+        self.file
+            .read_exact(&mut page_len_bytes)
+            .map_err(|e| Error::Io(e.to_string()))?;
+        let page_len = u32::from_be_bytes(page_len_bytes);
+
+        // now read the page data itself, not including the trailing zeroes
+        let mut page_data = vec![0; page_len as usize];
+        self.file
+            .read_exact(&mut page_data)
+            .map_err(|e| Error::Io(e.to_string()))?;
+
+        Ok(page_data)
     }
 
     fn put(&mut self, page_id: usize, payload: Vec<u8>) -> Result<(), Error> {
@@ -115,16 +145,23 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_allocate() {
+    fn test_file_page_store() {
         let temp_dir = env::temp_dir();
-        let db_file_path = temp_dir.join("allocate_test").with_extension("dbdb");
+        let db_file_path = temp_dir.join("file_store_test").with_extension("dbdb");
         // just cleaning up from a previous run, doesn't matter what happens
         let _ = fs::remove_file(&db_file_path);
 
         let mut file_builder = FileBuilder::new(temp_dir, 16 * 1024);
-        let mut store = file_builder.build("allocate_test").unwrap();
+        let mut store = file_builder.build("file_store_test").unwrap();
         let next_page = store.allocate().unwrap();
         assert_eq!(2, next_page);
+
+        let page_data = store.get(next_page).unwrap();
+        assert!(page_data.is_empty());
+        assert_eq!(
+            Err(Error::UnallocatedPage(next_page + 2)),
+            store.get(next_page + 2)
+        );
 
         let _ = fs::remove_file(db_file_path);
     }
