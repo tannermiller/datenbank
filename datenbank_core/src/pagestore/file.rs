@@ -4,6 +4,22 @@ use std::path::PathBuf;
 
 use super::{Error, TablePageStore, TablePageStoreBuilder};
 
+// File maintains the second page (that is the 1st, since 0-indexed) to hold the initial free list.
+// The free list contains all the page ids, as big-endian u32s which have been allocated in the
+// file but are not currently marked as "in-use". The free list page starts with a header of 8
+// bytes:
+//   * 4 bytes for a pointer to the next free list page; it's zeroed out if there is none
+//   * 4 bytes for the count of page ids in this page
+// When allocating a new page, the free list is checked and a page id is popped off of it if one
+// exists. Only if no available page ids are in the free list then is a new page allocated to the
+// end of the file.
+// Another peculiarity of the free list is that the last page of it may be empty, but we can't free
+// it as that would cause the previous page to overflow, and thus we need a new free list page to
+// hold the free list page we just freed. So it is valid state for the last free page to either be
+// full and have no further pages or the last free list page may have no free pages. If the empty
+// free page has another free page_id then we can clear it and re-use it as the allocated page; we
+// must merely change the pointer on the previous free page to be clear.
+
 #[derive(Debug)]
 pub struct File {
     page_size: u32,
@@ -17,7 +33,55 @@ impl TablePageStore for File {
 
         // TODO: need to handle getting from the free list first and only allocating if nothing
         // free
+        let mut current_free_list_page = 1;
+        let mut previous_free_list_page = None;
+        loop {
+            let free_list_page = self.get(current_free_list_page)?;
 
+            if free_list_page.len() < 8 {
+                // somethings messed up with the free list page, just break and allocate a page id
+                break;
+            }
+
+            let next_page_pointer = read_u32_from_slice(&free_list_page[..4])?;
+
+            // if the next page pointer isn't zero, then there's another page out there, iterate to
+            // that since we pop off the back of the free list
+            if next_page_pointer != 0 {
+                previous_free_list_page = Some(current_free_list_page);
+                current_free_list_page = next_page_pointer as usize;
+                continue;
+            }
+
+            // now we know we're on the last page of the free list
+            let list_len = read_u32_from_slice(&free_list_page[4..8])?;
+
+            // If the list len is zero, then we're in the weird situation where we can't unfree
+            // this page, because then we'd need another free list page to hold this unfreed page.
+            // To sidestep that whole problem we'll just clear this page out and return it as the
+            // newly allocated page and reset the previous page's pointer to blank, indicating that
+            // it is now the last page.
+            if list_len == 0 {
+                todo!()
+            }
+
+            let start_idx = (8 + (list_len - 1) * 4) as usize;
+            let page_id = read_u32_from_slice(&free_list_page[start_idx..start_idx + 4])?;
+
+            // TODO: rewrite the free page without this page_id
+
+            if list_len == 1 {
+                // TODO: this was the last page, de-allocate this page and rewrite the previous
+                // free list page to be the last one, and add this current page id to the free list
+                // Uhh, doesn't this put me in a loop where I'm freeing the last one and now this
+                // page is free, but I don't have anywhere to put it
+                todo!()
+            }
+
+            return Ok(page_id as usize);
+        }
+
+        // if we made it past the loop, then we need to actually allocate a new page
         let position = self
             .file
             .seek(SeekFrom::End(0))
@@ -115,6 +179,13 @@ impl TablePageStore for File {
 
     fn delete(&mut self, page_id: usize) -> Result<(), Error> {
         todo!()
+    }
+}
+
+fn read_u32_from_slice(slice: &[u8]) -> Result<u32, Error> {
+    match slice.try_into() {
+        Ok(s) => Ok(u32::from_be_bytes(s)),
+        Err(e) => Err(Error::Io(e.to_string())),
     }
 }
 
