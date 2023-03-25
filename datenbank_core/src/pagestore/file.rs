@@ -31,12 +31,10 @@ impl TablePageStore for File {
         // Seek to end, get final position, divide by page_size to get current page_count,
         // write out a new page of zeroes
 
-        // TODO: need to handle getting from the free list first and only allocating if nothing
-        // free
         let mut current_free_list_page = 1;
         let mut previous_free_list_page = None;
         loop {
-            let free_list_page = self.get(current_free_list_page)?;
+            let mut free_list_page = self.get(current_free_list_page)?;
 
             if free_list_page.len() < 8 {
                 // somethings messed up with the free list page, just break and allocate a page id
@@ -61,22 +59,27 @@ impl TablePageStore for File {
             // To sidestep that whole problem we'll just clear this page out and return it as the
             // newly allocated page and reset the previous page's pointer to blank, indicating that
             // it is now the last page.
-            if list_len == 0 {
-                todo!()
+            match (list_len, previous_free_list_page) {
+                (0, None) => break, // first page, free list is empty, just allocate a new page
+                (0, Some(prev)) => {
+                    // return this page and make the prev page the last one
+                    let mut prev_free_page = self.get(prev)?;
+
+                    // clear the pointer bytes to indicate the prev page is now the last
+                    prev_free_page.splice(0..4, [0, 0, 0, 0]);
+                    self.put(prev, prev_free_page)?;
+
+                    // return the current free page as the allocated page
+                    return Ok(current_free_list_page);
+                }
+                _ => (), // otherwise continue down
             }
 
+            // pull out the last list from the free page
             let start_idx = (8 + (list_len - 1) * 4) as usize;
             let page_id = read_u32_from_slice(&free_list_page[start_idx..start_idx + 4])?;
-
-            // TODO: rewrite the free page without this page_id
-
-            if list_len == 1 {
-                // TODO: this was the last page, de-allocate this page and rewrite the previous
-                // free list page to be the last one, and add this current page id to the free list
-                // Uhh, doesn't this put me in a loop where I'm freeing the last one and now this
-                // page is free, but I don't have anywhere to put it
-                todo!()
-            }
+            free_list_page.splice(start_idx..start_idx + 4, [0, 0, 0, 0]);
+            self.put(current_free_list_page, free_list_page)?;
 
             return Ok(page_id as usize);
         }
