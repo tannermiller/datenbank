@@ -181,7 +181,55 @@ impl TablePageStore for File {
     }
 
     fn delete(&mut self, page_id: usize) -> Result<(), Error> {
-        todo!()
+        // On delete, we need to zero our the page and then add it to the free list. In order to
+        // add to the free list, we start at the first free list page (index 1) and follow the
+        // linked list of free list page nodes to the last one. We add this page id to the last
+        // one. If the page id won't fit on the last page then we utilize this page id as the new
+        // empty free list and the previous free list page has its pointer rewritten to point at
+        // this page.
+
+        let mut current_free_list_page = 1;
+        loop {
+            let mut free_list_page = self.get(current_free_list_page)?;
+
+            if free_list_page.len() < 8 {
+                // something's wrong here, we're just going to reformat this free list page and add
+                // our new page here
+
+                // 4 for pointer, 4 for len, 4 for first page id
+                let mut free_list_page = Vec::with_capacity(12);
+                free_list_page.extend(0u32.to_be_bytes());
+                free_list_page.extend(1u32.to_be_bytes());
+                free_list_page.extend((page_id as u32).to_be_bytes());
+
+                self.put(current_free_list_page, free_list_page)?;
+                return Ok(());
+            }
+
+            let next_page_pointer = read_u32_from_slice(&free_list_page[..4])?;
+            if next_page_pointer != 0 {
+                // head on to the next page
+                current_free_list_page = next_page_pointer as usize;
+                continue;
+            }
+
+            let list_len = read_u32_from_slice(&free_list_page[4..8])?;
+            let max_page_count = (self.usable_page_size() - 8) / 4;
+            if list_len as usize == max_page_count {
+                // this page is full, we need to make the deleted page a new free list page
+                free_list_page.splice(..4, (page_id as u32).to_be_bytes());
+                self.put(current_free_list_page, free_list_page)?;
+                self.put(page_id, vec![0, 0, 0, 0, 0, 0, 0, 0])?;
+                return Ok(());
+            }
+
+            // ok, we're sticking it in this page as we've got space in it
+            free_list_page.extend((page_id as u32).to_be_bytes());
+            free_list_page.splice(4..8, (list_len + 1).to_be_bytes());
+            self.put(current_free_list_page, free_list_page)?;
+
+            return Ok(());
+        }
     }
 }
 
