@@ -78,7 +78,8 @@ impl TablePageStore for File {
             // pull out the last list from the free page
             let start_idx = (8 + (list_len - 1) * 4) as usize;
             let page_id = read_u32_from_slice(&free_list_page[start_idx..start_idx + 4])?;
-            free_list_page.splice(start_idx..start_idx + 4, [0, 0, 0, 0]);
+            free_list_page.truncate(free_list_page.len() - 4);
+            free_list_page.splice(4..8, (list_len - 1).to_be_bytes());
             self.put(current_free_list_page, free_list_page)?;
 
             return Ok(page_id as usize);
@@ -306,13 +307,14 @@ mod test {
 
     #[test]
     fn test_file_page_store() {
+        let table_name = "file_store_test";
         let temp_dir = env::temp_dir();
-        let db_file_path = temp_dir.join("file_store_test").with_extension("dbdb");
+        let db_file_path = temp_dir.join(table_name).with_extension("dbdb");
         // just cleaning up from a previous run, doesn't matter what happens
         let _ = fs::remove_file(&db_file_path);
 
         let mut file_builder = FileBuilder::new(temp_dir, 16 * 1024);
-        let mut store = file_builder.build("file_store_test").unwrap();
+        let mut store = file_builder.build(table_name).unwrap();
         let next_page = store.allocate().unwrap();
         assert_eq!(2, next_page);
 
@@ -364,6 +366,38 @@ mod test {
             )),
             store.put(next_page, b"f".repeat(store.usable_page_size() + 1)),
         );
+
+        // test delete and allocate gives us this page back
+        store.delete(next_page).unwrap();
+        assert_eq!(next_page, store.allocate().unwrap());
+
+        let _ = fs::remove_file(db_file_path);
+    }
+
+    #[test]
+    fn test_free_list() {
+        let table_name = "free_list_test";
+        let temp_dir = env::temp_dir();
+        let db_file_path = temp_dir.join(table_name).with_extension("dbdb");
+        // just cleaning up from a previous run, doesn't matter what happens
+        let _ = fs::remove_file(&db_file_path);
+
+        let mut file_builder = FileBuilder::new(temp_dir, 16 * 1024);
+        let mut store = file_builder.build(table_name).unwrap();
+        let count = 10000;
+
+        for i in 0..count {
+            assert_eq!(i + 2, store.allocate().unwrap());
+        }
+
+        for i in 0..count {
+            store.delete(i + 2).unwrap();
+        }
+
+        for i in (0..count).rev() {
+            println!("allocate loop {i}");
+            assert_eq!(i + 2, store.allocate().unwrap());
+        }
 
         let _ = fs::remove_file(db_file_path);
     }
