@@ -1,4 +1,4 @@
-mod api;
+pub mod api;
 mod exec;
 mod pagestore;
 mod parser;

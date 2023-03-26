@@ -1,9 +1,26 @@
+use std::env;
+use std::fs;
+
+use datenbank_core::api::TablePageStoreBuilder;
 use datenbank_core::Database;
 
 #[test]
-fn test_basic_integration() {
-    let mut db = Database::memory();
+fn test_basic_memory_integration() {
+    let db = Database::memory();
+    run_basic_test(db);
+}
 
+#[test]
+fn test_basic_file_integration() {
+    let temp_dir = env::temp_dir().join("file_integration_test");
+    let _ = fs::remove_dir_all(&temp_dir);
+    let _ = fs::create_dir(&temp_dir);
+    let db = Database::file(&temp_dir);
+    run_basic_test(db);
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>) {
     let result = db
         .exec(
             r"CREATE TABLE testing {

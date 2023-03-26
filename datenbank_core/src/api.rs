@@ -1,8 +1,10 @@
+use std::path::PathBuf;
+
 use crate::exec::{execute, Error as ExecError};
-use crate::pagestore::{MemoryBuilder, TablePageStoreBuilder};
 use crate::parser::{parse, Error as ParseError};
 
 pub use crate::exec::ExecResult;
+pub use crate::pagestore::{FileBuilder, MemoryBuilder, TablePageStoreBuilder};
 
 // 16k page sizes for now
 // TODO: How should this be made configurable?
@@ -25,6 +27,12 @@ impl Database<MemoryBuilder> {
     pub fn memory() -> Database<MemoryBuilder> {
         Database {
             builder: MemoryBuilder::new(PAGE_SIZE),
+        }
+    }
+
+    pub fn file(path: impl Into<PathBuf>) -> Database<FileBuilder> {
+        Database {
+            builder: FileBuilder::new(path, PAGE_SIZE as u32),
         }
     }
 }
