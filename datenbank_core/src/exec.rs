@@ -30,6 +30,7 @@ pub fn execute<B: TablePageStoreBuilder>(
             columns,
             values,
         } => insert_into(store_builder, table_name, columns, values),
+        Input::SelectFrom { .. } => todo!(),
     }
 }
 

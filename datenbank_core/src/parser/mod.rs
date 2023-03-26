@@ -8,10 +8,12 @@ use nom::{Finish, IResult};
 
 use create_table::create_table;
 use insert_into::insert_into;
+use select_from::select_from;
 
 mod create_table;
 mod insert_into;
 mod literal;
+mod select_from;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
 #[error("error parsing SQL input: {msg}")]
@@ -31,6 +33,10 @@ pub enum Input<'a> {
         table_name: &'a str,
         columns: Vec<&'a str>,
         values: Vec<Vec<Literal>>,
+    },
+    SelectFrom {
+        table_name: &'a str,
+        columns: SelectColumns<'a>,
     },
 }
 
@@ -77,8 +83,14 @@ impl<'a> ColumnSchema<'a> {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum SelectColumns<'a> {
+    Star,
+    Explicit(Vec<&'a str>),
+}
+
 pub fn parse(input_str: &str) -> Result<Input, Error> {
-    let parse_result = alt((create_table, insert_into))(input_str);
+    let parse_result = alt((create_table, insert_into, select_from))(input_str);
     match parse_result.finish() {
         Ok((_, input)) => Ok(input),
         Err(err) => Err(Error {
