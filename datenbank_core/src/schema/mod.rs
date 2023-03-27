@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::parser::Literal;
+use crate::parser::{Literal, SelectColumns};
 
 mod encode;
 
@@ -204,8 +204,38 @@ impl Schema {
 
         Ok(ordered)
     }
+
+    // valiadate the select from columns and expand a *
+    pub fn expand_select_columns(&self, columns: SelectColumns) -> Result<Vec<String>, Error> {
+        match columns {
+            SelectColumns::Star => Ok(self.columns.iter().map(|(c, _)| c.clone()).collect()),
+            SelectColumns::Explicit(cols) => {
+                let mut result_columns = Vec::with_capacity(cols.len());
+                for col in cols {
+                    let mut found = false;
+                    for (schema_col, _) in &self.columns {
+                        if col == schema_col {
+                            result_columns.push(col.to_string());
+                            found = true;
+                            break;
+                        }
+                    }
+
+                    if !found {
+                        return Err(Error::InvalidColumn(col.to_string()));
+                    }
+                }
+                Ok(result_columns)
+            }
+        }
+    }
+
+    pub fn columns(&self) -> &[(String, ColumnType)] {
+        &self.columns
+    }
 }
 
+// TODO: Rename this to Value as its independent of the column
 #[derive(Clone, Debug, PartialEq)]
 pub enum Column {
     // VarChar is variable length string with max length of 65,535.

@@ -97,6 +97,11 @@ impl<S: TablePageStore> Table<S> {
 
         Ok(rows_affected)
     }
+
+    // Scan the entire table for and return the values for every row for the provided columns.
+    pub fn scan(&mut self, columns: Vec<String>) -> Result<Vec<Vec<Column>>, Error> {
+        self.tree.scan(columns).map_err(Into::into)
+    }
 }
 
 #[cfg(test)]

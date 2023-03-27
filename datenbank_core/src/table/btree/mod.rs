@@ -2,7 +2,7 @@ use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder
 use crate::schema::{Column, Schema};
 use cache::Cache;
 use node::{Internal, Leaf, Node, NodeBody};
-use row::Row;
+use row::{Row, RowCol};
 
 pub mod cache;
 mod encode;
@@ -241,6 +241,96 @@ impl<S: TablePageStore> BTree<S> {
         self.node_cache.put(new_root_id, new_root)?;
 
         Ok(Some(new_root_id))
+    }
+
+    pub fn scan(&mut self, columns: Vec<String>) -> Result<Vec<Vec<Column>>, Error> {
+        let root_id = match self.root {
+            None => return Ok(vec![]),
+            Some(root_id) => root_id,
+        };
+
+        let mut node = self.node_cache.get(root_id)?;
+
+        let mut leaf_id = loop {
+            let child_page_id = match &node.body {
+                NodeBody::Leaf(_) => break node.id,
+                NodeBody::Internal(Internal { children, .. }) => children[0],
+            };
+            node = self.node_cache.get(child_page_id)?;
+        };
+
+        let mut final_result = Vec::with_capacity(self.order);
+        loop {
+            let node = self.node_cache.get(leaf_id)?;
+
+            let (rows, right_sibling) = match &node.body {
+                NodeBody::Leaf(Leaf {
+                    rows,
+                    right_sibling,
+                }) => (rows, right_sibling),
+                NodeBody::Internal(_) => unreachable!(),
+            };
+
+            for row in rows {
+                let mut row_values = Vec::with_capacity(columns.len());
+
+                for (col, (schema_col, _)) in row.body.iter().zip(self.schema.columns()) {
+                    if !columns.contains(schema_col) {
+                        continue;
+                    }
+
+                    let val = match col {
+                        RowCol::Int(i) => Column::Int(*i),
+                        RowCol::Bool(b) => Column::Bool(*b),
+                        RowCol::VarChar(vc) => {
+                            let mut vc_data = vc.inline.to_vec();
+
+                            if let Some(data_page_id) = vc.next_page {
+                                let mut data_page_id = data_page_id;
+                                loop {
+                                    let vc_page = self.data_cache.get(data_page_id)?;
+
+                                    if vc_page.len() < 4 {
+                                        break;
+                                    }
+
+                                    let next_pointer =
+                                        u32::from_be_bytes(vc_page[..4].try_into().map_err(
+                                            |e: std::array::TryFromSliceError| {
+                                                Error::InvalidColumn(e.to_string())
+                                            },
+                                        )?);
+
+                                    vc_data.extend(&vc_page[4..]);
+
+                                    if next_pointer != 0 {
+                                        data_page_id = next_pointer as usize;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+
+                            match String::from_utf8(vc_data) {
+                                Ok(s) => Column::VarChar(s),
+                                Err(e) => {
+                                    return Err(Error::InvalidColumn(e.to_string()));
+                                }
+                            }
+                        }
+                    };
+                    row_values.push(val);
+                }
+
+                final_result.push(row_values);
+            }
+
+            leaf_id = match right_sibling {
+                Some(page_id) => *page_id,
+                None => break,
+            };
+        }
+        Ok(final_result)
     }
 
     fn commit(&mut self) -> Result<(), Error> {
