@@ -448,4 +448,45 @@ mod test {
         ]];
         check(&schema, &["qux", "bar", "foo"], cols, Some(correct_cols));
     }
+
+    #[test]
+    fn test_expand_select_columns() {
+        fn check(schema: &Schema, columns: SelectColumns, expected: Option<Vec<String>>) {
+            let result = schema.expand_select_columns(columns);
+            match (result, expected) {
+                (Ok(cols), Some(exp)) => assert_eq!(exp, cols),
+                (Err(_), None) => (),
+                (Ok(_), None) => panic!("shouldn't have passed"),
+                (Err(err), Some(_)) => panic!("should't have errored: {}", err),
+            }
+        }
+
+        let schema = Schema::new(vec![
+            ("foo".into(), ColumnType::Int),
+            ("bar".into(), ColumnType::Bool),
+            ("qux".into(), ColumnType::VarChar(10)),
+        ])
+        .unwrap();
+
+        check(
+            &schema,
+            SelectColumns::Star,
+            Some(vec![
+                "foo".to_string(),
+                "bar".to_string(),
+                "qux".to_string(),
+            ]),
+        );
+        check(
+            &schema,
+            SelectColumns::Explicit(vec!["foo"]),
+            Some(vec!["foo".to_string()]),
+        );
+        check(&schema, SelectColumns::Explicit(vec!["nope"]), None);
+        check(
+            &schema,
+            SelectColumns::Explicit(vec!["bar", "foo"]),
+            Some(vec!["bar".to_string(), "foo".to_string()]),
+        );
+    }
 }
