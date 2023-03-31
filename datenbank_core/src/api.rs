@@ -5,6 +5,7 @@ use crate::parser::{parse, Error as ParseError};
 
 pub use crate::exec::{DatabaseResult, ExecResult, QueryResult};
 pub use crate::pagestore::{FileBuilder, MemoryBuilder, TablePageStoreBuilder};
+pub use crate::schema::Column;
 
 // 16k page sizes for now
 // TODO: How should this be made configurable?

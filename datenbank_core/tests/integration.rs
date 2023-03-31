@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 
-use datenbank_core::api::{DatabaseResult, ExecResult, TablePageStoreBuilder};
+use datenbank_core::api::{Column, DatabaseResult, ExecResult, QueryResult, TablePageStoreBuilder};
 use datenbank_core::Database;
 
 #[test]
@@ -24,6 +24,13 @@ fn exec_result(db: DatabaseResult) -> ExecResult {
     match db {
         DatabaseResult::Exec(er) => er,
         _ => panic!("expected DatabaseResult::ExecResult"),
+    }
+}
+
+fn query_result(db: DatabaseResult) -> QueryResult {
+    match db {
+        DatabaseResult::Query(qr) => qr,
+        _ => panic!("expected DatabaseResult::QueryResult"),
     }
 }
 
@@ -56,4 +63,42 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>) {
         .exec("INSERT INTO testing (foo, bar, baz) VALUES (3, false, \"whats\"), (4, true, \"up\")")
         .unwrap();
     assert_eq!(2, exec_result(result).rows_affected);
+
+    let result = db.exec("SELECT * FROM testing").unwrap();
+    assert_eq!(
+        vec![
+            vec![
+                Column::Int(1),
+                Column::Bool(false),
+                Column::VarChar("hello".to_string()),
+            ],
+            vec![
+                Column::Int(2),
+                Column::Bool(true),
+                Column::VarChar("world".to_string()),
+            ],
+            vec![
+                Column::Int(3),
+                Column::Bool(false),
+                Column::VarChar("whats".to_string()),
+            ],
+            vec![
+                Column::Int(4),
+                Column::Bool(true),
+                Column::VarChar("up".to_string()),
+            ]
+        ],
+        query_result(result).values
+    );
+
+    let result = db.exec("SELECT foo, bar FROM testing").unwrap();
+    assert_eq!(
+        vec![
+            vec![Column::Int(1), Column::Bool(false),],
+            vec![Column::Int(2), Column::Bool(true),],
+            vec![Column::Int(3), Column::Bool(false),],
+            vec![Column::Int(4), Column::Bool(true),]
+        ],
+        query_result(result).values
+    );
 }
