@@ -120,7 +120,7 @@ impl Leaf {
     // insert a row into this leaf node, if this node has to split, the new right sibling's body is
     // returned in the option
     pub(crate) fn insert_row(&mut self, order: usize, row: Row) -> Result<Option<NodeBody>, Error> {
-        if self.rows.len() + 1 < order {
+        if self.rows.len() + 1 <= order {
             match self.rows.binary_search_by_key(&row.key(), |r| r.key()) {
                 Ok(_) => Err(Error::DuplicateEntry(row.key())),
                 Err(i) => {
@@ -134,7 +134,7 @@ impl Leaf {
             let midpoint = ((self.rows.len() + 1) as f64 / 2.0).ceil() as usize;
             let mut right_sib_rows = self.rows.split_off(midpoint);
 
-            let rows = if row.key() < right_sib_rows[0].key() {
+            let rows = if right_sib_rows.len() != 0 && row.key() < right_sib_rows[0].key() {
                 &mut self.rows
             } else {
                 &mut right_sib_rows
