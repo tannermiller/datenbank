@@ -173,7 +173,7 @@ impl<S: TablePageStore> BTree<S> {
         // We only get past this point if we've split the leaf node and need to insert the new
         // sibling. new_child_id will be the var that we use to communicate up each level of the
         // internal nodes to indicate a newly inserted split node.
-        let left_child = match &body {
+        let mut new_child_key = match &body {
             NodeBody::Leaf(Leaf { rows, .. }) => rows[0].key(),
             _ => unreachable!(), // We know this is a leaf since we just split a leaf
         };
@@ -205,16 +205,17 @@ impl<S: TablePageStore> BTree<S> {
             };
 
             let child_outcome =
-                internal_node.insert_child(self.order, new_child_id, left_child.clone())?;
+                internal_node.insert_child(self.order, new_child_id, new_child_key.clone())?;
 
-            let body = match child_outcome {
-                Some(body) => body,
+            let (child_key, body) = match child_outcome {
+                Some(out) => out,
                 None => return Ok(None), // didn't split, we're done inserting
             };
 
             // update new_child_id and so that the next loop picks up this value and inserts into
             // that internal node
             new_child_id = self.node_cache.allocate()?;
+            new_child_key = child_key;
 
             let split_node = Node {
                 id: new_child_id,
@@ -231,7 +232,7 @@ impl<S: TablePageStore> BTree<S> {
             id: new_root_id,
             order: self.order,
             body: NodeBody::Internal(Internal {
-                boundary_keys: vec![left_child],
+                boundary_keys: vec![new_child_key],
                 children: vec![root_id, new_child_id],
             }),
         };
@@ -352,13 +353,18 @@ mod test {
     use crate::pagestore::MemoryBuilder;
     use crate::schema::ColumnType;
 
-    fn leaf_node(id: usize, order: usize, row_data: Vec<RowCol>) -> Node {
+    fn leaf_node(
+        id: usize,
+        order: usize,
+        row_data: Vec<Vec<RowCol>>,
+        right_sibling: Option<usize>,
+    ) -> Node {
         Node {
             id,
             order,
             body: NodeBody::Leaf(Leaf {
-                rows: vec![Row { body: row_data }],
-                right_sibling: None,
+                rows: row_data.into_iter().map(|body| Row { body }).collect(),
+                right_sibling,
             }),
         }
     }
@@ -388,7 +394,10 @@ mod test {
 
         let root_id = node_cache.allocate().unwrap();
         node_cache
-            .put(root_id, leaf_node(root_id, 10, vec![RowCol::Int(1)]))
+            .put(
+                root_id,
+                leaf_node(root_id, 10, vec![vec![RowCol::Int(1)]], None),
+            )
             .unwrap();
 
         let mut btree = BTree {
@@ -426,13 +435,23 @@ mod test {
         node_cache
             .put(
                 left_id,
-                leaf_node(left_id, 10, vec![RowCol::Int(1), RowCol::Int(7)]),
+                leaf_node(
+                    left_id,
+                    10,
+                    vec![vec![RowCol::Int(1), RowCol::Int(7)]],
+                    None,
+                ),
             )
             .unwrap();
         node_cache
             .put(
                 right_id,
-                leaf_node(right_id, 10, vec![RowCol::Int(10), RowCol::Int(15)]),
+                leaf_node(
+                    right_id,
+                    10,
+                    vec![vec![RowCol::Int(10), RowCol::Int(15)]],
+                    None,
+                ),
             )
             .unwrap();
 
@@ -452,6 +471,11 @@ mod test {
         assert_eq!(vec![root_id], parents);
     }
 
+    fn assert_node<S: TablePageStore>(node: &Node, node_cache: &mut Cache<S, Node>) {
+        let loaded_node = node_cache.get(node.id).unwrap();
+        assert_eq!(node, loaded_node,);
+    }
+
     #[test]
     fn test_insert_across_split() {
         let schema = Schema::new(vec![("foo".into(), ColumnType::Int)]).unwrap();
@@ -465,7 +489,7 @@ mod test {
         node_cache
             .put(
                 orig_root_id,
-                leaf_node(orig_root_id, order, vec![RowCol::Int(0)]),
+                leaf_node(orig_root_id, order, vec![vec![RowCol::Int(0)]], None),
             )
             .unwrap();
 
@@ -485,66 +509,79 @@ mod test {
             vec![Column::Int(3)],
         ];
         let (count, root_changed) = btree.insert(to_insert).unwrap();
-
         assert_eq!(3, count);
         assert!(root_changed);
 
         let new_root_id = btree.root.unwrap();
         assert!(orig_root_id != new_root_id);
         let mut node_cache: Cache<_, Node> = Cache::new(store_builder.build(table_name).unwrap());
-        let root_node = node_cache.get(new_root_id).unwrap();
-        assert_eq!(order, root_node.order);
-        let root_internal = match &root_node.body {
-            NodeBody::Leaf(_) => panic!("got leaf node for root"),
-            NodeBody::Internal(internal) => internal,
-        };
-        assert_eq!(1, root_internal.boundary_keys.len());
-        assert_eq!(vec![0u8, 0, 0, 2], root_internal.boundary_keys[0]);
-        assert_eq!(2, root_internal.children.len());
-
-        let left_id = root_internal.children[0];
-        let right_id = root_internal.children[1];
-
-        {
-            let left_node = node_cache.get(left_id).unwrap();
-            assert_eq!(order, left_node.order);
-            let left_leaf = match &left_node.body {
-                NodeBody::Leaf(l) => l,
-                NodeBody::Internal(_) => panic!("got internal leaf for left child"),
-            };
-            assert_eq!(2, left_leaf.rows.len());
-            assert_eq!(
-                vec![
-                    Row {
-                        body: vec![RowCol::Int(0)]
-                    },
-                    Row {
-                        body: vec![RowCol::Int(1)]
-                    }
-                ],
-                left_leaf.rows
-            );
-            assert_eq!(Some(right_id), left_leaf.right_sibling);
-        }
-
-        let right_node = node_cache.get(right_id).unwrap();
-        assert_eq!(order, right_node.order);
-        let right_leaf = match &right_node.body {
-            NodeBody::Leaf(l) => l,
-            NodeBody::Internal(_) => panic!("got internal leaf for right child"),
-        };
-        assert_eq!(2, right_leaf.rows.len());
-        assert_eq!(
-            vec![
-                Row {
-                    body: vec![RowCol::Int(2)]
-                },
-                Row {
-                    body: vec![RowCol::Int(3)]
-                },
-            ],
-            right_leaf.rows
+        assert_node(
+            &internal_node(new_root_id, 2, vec![vec![0, 0, 0, 2]], vec![1, 2]),
+            &mut node_cache,
         );
-        assert_eq!(None, right_leaf.right_sibling);
+
+        let left_id = 1;
+        let right_id = 2;
+        assert_node(
+            &leaf_node(
+                left_id,
+                2,
+                vec![vec![RowCol::Int(0)], vec![RowCol::Int(1)]],
+                Some(right_id),
+            ),
+            &mut node_cache,
+        );
+        assert_node(
+            &leaf_node(
+                right_id,
+                2,
+                vec![vec![RowCol::Int(2)], vec![RowCol::Int(3)]],
+                None,
+            ),
+            &mut node_cache,
+        );
+
+        let (count, root_changed) = btree.insert(vec![vec![Column::Int(4)]]).unwrap();
+        assert_eq!(1, count);
+        assert!(root_changed);
+        let mut node_cache: Cache<_, Node> = Cache::new(store_builder.build(table_name).unwrap());
+
+        let next_new_root_id = btree.root.unwrap();
+        assert!(new_root_id != next_new_root_id);
+        assert_node(
+            &internal_node(next_new_root_id, 2, vec![vec![0, 0, 0, 4]], vec![3, 5]),
+            &mut node_cache,
+        );
+
+        assert_node(
+            &internal_node(3, 2, vec![vec![0, 0, 0, 2]], vec![1, 2]),
+            &mut node_cache,
+        );
+
+        assert_node(
+            &leaf_node(
+                1,
+                2,
+                vec![vec![RowCol::Int(0)], vec![RowCol::Int(1)]],
+                Some(2),
+            ),
+            &mut node_cache,
+        );
+        assert_node(
+            &leaf_node(
+                2,
+                2,
+                vec![vec![RowCol::Int(2)], vec![RowCol::Int(3)]],
+                Some(4),
+            ),
+            &mut node_cache,
+        );
+
+        assert_node(&internal_node(5, 2, vec![], vec![4]), &mut node_cache);
+
+        assert_node(
+            &leaf_node(4, 2, vec![vec![RowCol::Int(4)]], None),
+            &mut node_cache,
+        );
     }
 }

@@ -64,8 +64,8 @@ impl Internal {
         order: usize,
         child_id: usize,
         child_key: Vec<u8>,
-    ) -> Result<Option<NodeBody>, Error> {
-        if self.children.len() + 1 < order {
+    ) -> Result<Option<(Vec<u8>, NodeBody)>, Error> {
+        if self.children.len() + 1 <= order {
             match self.boundary_keys.binary_search(&child_key) {
                 Ok(_) => Err(Error::DuplicateEntry(child_key)),
                 Err(i) => {
@@ -83,27 +83,43 @@ impl Internal {
             let mut right_sib_children = self.children.split_off(midpoint);
             let mut right_boundary_keys = self.boundary_keys.split_off(midpoint - 1);
 
+            // before split:
+            // boundary_keys =    [ k1 k2 k3 k4 k5 ]
+            // children      = [ c0 c1 c2 c3 c4 c5 ]
+            // midpoint      =            ^
+            //
+            // after split:                   v this key gets removed and passed up
+            // boundary_keys =    [ k1 k2 ] [ k3 k4 k5 ]
+            // children      = [ c0 c1 c2 ] [ c3 c4 c5 ]
+
             // insert the new child
-            let (boundary_keys, children) = if child_key < right_boundary_keys[0] {
-                // insert in left sibling
-                (&mut self.boundary_keys, &mut self.children)
-            } else {
-                // insert in right sibling
-                (&mut right_boundary_keys, &mut right_sib_children)
-            };
+            let (boundary_keys, children) =
+                if right_boundary_keys.len() != 0 && child_key < right_boundary_keys[0] {
+                    // insert in left sibling
+                    (&mut self.boundary_keys, &mut self.children)
+                } else {
+                    // insert in right sibling
+                    (&mut right_boundary_keys, &mut right_sib_children)
+                };
 
             match boundary_keys.binary_search(&child_key) {
                 Ok(_) => return Err(Error::DuplicateEntry(child_key)),
                 Err(i) => {
+                    // inser these at the same index as we'll remove the first boundary key just
+                    // below here to pass it up to the next internal
                     boundary_keys.insert(i, child_key);
-                    children.insert(i + 1, child_id);
+                    children.insert(i, child_id);
                 }
             }
+            let starting_key = right_boundary_keys.remove(0);
 
-            Ok(Some(NodeBody::Internal(Internal {
-                boundary_keys: right_boundary_keys,
-                children: right_sib_children,
-            })))
+            Ok(Some((
+                starting_key,
+                NodeBody::Internal(Internal {
+                    boundary_keys: right_boundary_keys,
+                    children: right_sib_children,
+                }),
+            )))
         }
     }
 }

@@ -204,7 +204,7 @@ mod test {
     }
 
     #[test]
-    fn test_big_inserts() {
+    fn test_big_table() {
         let name = "big_inserts".to_string();
         let schema = Schema::new(vec![
             ("one".into(), ColumnType::Int),
@@ -215,18 +215,19 @@ mod test {
         let mut store_builder = MemoryBuilder::new(1024 * 16);
         let mut table = Table::create(name.clone(), schema.clone(), &mut store_builder).unwrap();
 
-        let mut rows = Vec::with_capacity(10_000);
-        for i in 0..10_000 {
+        let big_num = 10_000;
+        let mut rows = Vec::with_capacity(big_num);
+        for i in 0..big_num {
             rows.push(vec![
-                Column::Int(i),
-                Column::VarChar(i.to_string().repeat(100)),
+                Column::Int(i as i32),
+                Column::VarChar((i % 10).to_string().repeat(100)),
                 Column::Bool(i % 2 == 0),
             ]);
         }
 
         let rows_affected = table.insert(&["one", "two", "three"], rows).unwrap();
 
-        assert_eq!(10_000, rows_affected);
+        assert_eq!(big_num, rows_affected);
 
         let mut store = store_builder.build(&name).unwrap();
         let root_id = {
@@ -238,6 +239,7 @@ mod test {
 
         let root_node_bytes = store.get(root_id).unwrap();
         let root_node = decode_node(&root_node_bytes).unwrap();
+        assert_eq!(30, root_node.order);
 
         let internal = match root_node.body {
             NodeBody::Internal(i) => i,
@@ -245,5 +247,23 @@ mod test {
         };
 
         assert!(!internal.children.is_empty());
+
+        let values = table
+            .scan(vec![
+                "one".to_string(),
+                "two".to_string(),
+                "three".to_string(),
+            ])
+            .unwrap();
+
+        assert_eq!(big_num, values.len());
+
+        for (i, vs) in values.iter().enumerate() {
+            let i = i as i32;
+            assert_eq!(3, vs.len());
+            assert_eq!(Column::Int(i), vs[0]);
+            assert_eq!(Column::VarChar((i % 10).to_string().repeat(100)), vs[1]);
+            assert_eq!(Column::Bool(i % 2 == 0), vs[2]);
+        }
     }
 }

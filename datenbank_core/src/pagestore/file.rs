@@ -395,7 +395,6 @@ mod test {
         }
 
         for i in (0..count).rev() {
-            println!("allocate loop {i}");
             assert_eq!(i + 2, store.allocate().unwrap());
         }
 
