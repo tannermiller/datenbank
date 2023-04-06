@@ -37,6 +37,7 @@ pub enum Input<'a> {
     SelectFrom {
         table_name: &'a str,
         columns: SelectColumns<'a>,
+        where_clause: Option<Expression<'a>>,
     },
 }
 
@@ -115,6 +116,58 @@ pub fn identifier_bytes(input: &[u8]) -> IResult<&[u8], &[u8]> {
     recognize(pair(alpha1, many0(alt((alphanumeric1, tag("_"))))))(input)
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum EqualityOp {
+    Equal,
+    NotEqual,
+    GreaterThan,
+    GreaterThanOrEqualTo,
+    LessThan,
+    LessThanOrEqualTo,
+}
+
+impl std::fmt::Display for EqualityOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let sign = match self {
+            EqualityOp::Equal => "=",
+            EqualityOp::NotEqual => "!=",
+            EqualityOp::GreaterThan => ">",
+            EqualityOp::GreaterThanOrEqualTo => ">=",
+            EqualityOp::LessThan => "<",
+            EqualityOp::LessThanOrEqualTo => "<=",
+        };
+        write!(f, "{}", sign)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum LogicalOp {
+    And,
+    Or,
+}
+
+impl std::fmt::Display for LogicalOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let sign = match self {
+            LogicalOp::And => "AND",
+            LogicalOp::Or => "OR",
+        };
+        write!(f, "{}", sign)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Expression<'a> {
+    Comparison(Terminal<'a>, EqualityOp, Terminal<'a>),
+    Logical(Box<Expression<'a>>, LogicalOp, Box<Expression<'a>>),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Terminal<'a> {
+    Identifier(&'a str),
+    Literal(Literal),
+}
+
 // this is just a test util that can be shared across all parser testing
 #[cfg(test)]
 fn parse_check<'a, T, F>(f: F, input: &'a str, expected: Option<T>)
@@ -124,12 +177,13 @@ where
 {
     match (f(input), expected) {
         (Ok((rest, result)), Some(exp)) => {
+            println!("rest: {rest}");
             assert!(rest.is_empty());
             assert_eq!(result, exp);
         }
         (Err(_), None) => (),
-        (Ok(_), None) => panic!("shouldn't have passed"),
-        (Err(err), Some(_)) => panic!("should't have errored: {}", err),
+        (Ok(_), None) => panic!("input \"{input}\" shouldn't have passed"),
+        (Err(err), Some(_)) => panic!("input \"{input}\" should't have errored: {err}"),
     }
 }
 

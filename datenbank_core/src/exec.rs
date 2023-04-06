@@ -42,6 +42,7 @@ pub fn execute<B: TablePageStoreBuilder>(
         Input::SelectFrom {
             table_name,
             columns,
+            .. // TODO
         } => select_from(store_builder, table_name, columns),
     }
 }
