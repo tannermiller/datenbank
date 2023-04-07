@@ -155,6 +155,39 @@ impl<S: TablePageStore> BTree<S> {
         Ok(final_result)
     }
 
+    // find the leaf that either contains a key or should be the leaf into which the key would be
+    // inserted
+    fn find_containing_leaf(&mut self, key_id: &Vec<u8>) -> Result<(usize, Vec<usize>), Error> {
+        let mut node_id = match self.root {
+            Some(root_id) => root_id,
+            None => return Err(Error::EmptyTable),
+        };
+        let mut path = vec![];
+
+        loop {
+            let node = self.node_cache.get(node_id)?;
+
+            match &node.body {
+                NodeBody::Internal(Internal {
+                    boundary_keys,
+                    children,
+                }) => {
+                    path.push(node_id);
+                    let key_idx = match boundary_keys.binary_search(key_id) {
+                        // means we found it exactly, will be the first element in the
+                        // children[i+1]
+                        Ok(i) => i + 1,
+                        // means we didn't find it exactly, but this i will be BEFORE the
+                        // corresponding boundary key, so we want the child to the left of it
+                        Err(i) => i,
+                    };
+                    node_id = children[key_idx];
+                }
+                NodeBody::Leaf(_) => return Ok((node_id, path)),
+            }
+        }
+    }
+
     fn commit(&mut self) -> Result<(), Error> {
         self.node_cache.commit()?;
         self.data_cache.commit()
@@ -166,5 +199,131 @@ impl<S: TablePageStore> BTree<S> {
     //     - if the root node has not been initialied, then a value of 0 will be stored here
     pub fn encode(&self) -> Vec<u8> {
         encode::encode(self)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::pagestore::MemoryBuilder;
+    use crate::schema::ColumnType;
+    use row::Row;
+
+    pub(crate) fn leaf_node(
+        id: usize,
+        order: usize,
+        row_data: Vec<Vec<RowCol>>,
+        right_sibling: Option<usize>,
+    ) -> Node {
+        Node {
+            id,
+            order,
+            body: NodeBody::Leaf(Leaf {
+                rows: row_data.into_iter().map(|body| Row { body }).collect(),
+                right_sibling,
+            }),
+        }
+    }
+
+    pub(crate) fn internal_node(
+        id: usize,
+        order: usize,
+        boundary_keys: Vec<Vec<u8>>,
+        children: Vec<usize>,
+    ) -> Node {
+        Node {
+            id,
+            order,
+            body: NodeBody::Internal(Internal {
+                boundary_keys,
+                children,
+            }),
+        }
+    }
+
+    #[test]
+    fn test_find_containing_leaf_root_is_leaf() {
+        let schema = Schema::new(vec![("foo".into(), ColumnType::Int)]).unwrap();
+        let mut store_builder = MemoryBuilder::new(64 * 1024);
+        let data_cache = Cache::new(store_builder.build("test").unwrap());
+        let mut node_cache = Cache::new(store_builder.build("test").unwrap());
+
+        let root_id = node_cache.allocate().unwrap();
+        node_cache
+            .put(
+                root_id,
+                leaf_node(root_id, 10, vec![vec![RowCol::Int(1)]], None),
+            )
+            .unwrap();
+
+        let mut btree = BTree {
+            name: "test".to_string(),
+            schema,
+            order: 10,
+            root: Some(root_id),
+            node_cache,
+            data_cache,
+            store: store_builder.build("test").unwrap(),
+        };
+
+        let (leaf_id, parents) = btree.find_containing_leaf(&b"1".to_vec()).unwrap();
+
+        assert_eq!(root_id, leaf_id);
+        assert!(parents.is_empty());
+    }
+
+    #[test]
+    fn test_find_containing_leaf_root_is_internal() {
+        let schema = Schema::new(vec![("foo".into(), ColumnType::Int)]).unwrap();
+        let mut store_builder = MemoryBuilder::new(64 * 1024);
+        let data_cache = Cache::new(store_builder.build("test").unwrap());
+        let mut node_cache = Cache::new(store_builder.build("test").unwrap());
+
+        let root_id = node_cache.allocate().unwrap();
+        let left_id = node_cache.allocate().unwrap();
+        let right_id = node_cache.allocate().unwrap();
+        node_cache
+            .put(
+                root_id,
+                internal_node(root_id, 10, vec![b"10".to_vec()], vec![left_id, right_id]),
+            )
+            .unwrap();
+        node_cache
+            .put(
+                left_id,
+                leaf_node(
+                    left_id,
+                    10,
+                    vec![vec![RowCol::Int(1), RowCol::Int(7)]],
+                    None,
+                ),
+            )
+            .unwrap();
+        node_cache
+            .put(
+                right_id,
+                leaf_node(
+                    right_id,
+                    10,
+                    vec![vec![RowCol::Int(10), RowCol::Int(15)]],
+                    None,
+                ),
+            )
+            .unwrap();
+
+        let mut btree = BTree {
+            name: "test".to_string(),
+            schema,
+            order: 10,
+            root: Some(root_id),
+            node_cache,
+            data_cache,
+            store: store_builder.build("test").unwrap(),
+        };
+
+        let (leaf_id, parents) = btree.find_containing_leaf(&b"15".to_vec()).unwrap();
+
+        assert_eq!(right_id, leaf_id);
+        assert_eq!(vec![root_id], parents);
     }
 }
