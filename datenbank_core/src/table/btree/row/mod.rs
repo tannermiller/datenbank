@@ -3,7 +3,7 @@ use std::io::Write;
 use super::cache::Cache;
 use super::Error;
 use crate::pagestore::TablePageStore;
-use crate::schema::{Column, MAX_INLINE_VAR_LEN_COL_SIZE};
+use crate::schema::{Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
 
 pub(crate) mod encode;
 
@@ -51,6 +51,65 @@ impl Row {
         // pop off the last _ that was inserted
         key.pop();
         key
+    }
+
+    pub(crate) fn to_columns<S: TablePageStore>(
+        &self,
+        data_cache: &mut Cache<S, Vec<u8>>,
+        schema: &Schema,
+        columns: &[String],
+    ) -> Result<Vec<Column>, Error> {
+        let mut row_values = Vec::with_capacity(columns.len());
+
+        for (col, (schema_col, _)) in self.body.iter().zip(schema.columns()) {
+            if !columns.contains(schema_col) {
+                continue;
+            }
+
+            let val = match col {
+                RowCol::Int(i) => Column::Int(*i),
+                RowCol::Bool(b) => Column::Bool(*b),
+                RowCol::VarChar(vc) => {
+                    let mut vc_data = vc.inline.to_vec();
+
+                    if let Some(data_page_id) = vc.next_page {
+                        let mut data_page_id = data_page_id;
+                        loop {
+                            let vc_page = data_cache.get(data_page_id)?;
+
+                            if vc_page.len() < 4 {
+                                break;
+                            }
+
+                            let next_pointer =
+                                u32::from_be_bytes(vc_page[..4].try_into().map_err(
+                                    |e: std::array::TryFromSliceError| {
+                                        Error::InvalidColumn(e.to_string())
+                                    },
+                                )?);
+
+                            vc_data.extend(&vc_page[4..]);
+
+                            if next_pointer != 0 {
+                                data_page_id = next_pointer as usize;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+
+                    match String::from_utf8(vc_data) {
+                        Ok(s) => Column::VarChar(s),
+                        Err(e) => {
+                            return Err(Error::InvalidColumn(e.to_string()));
+                        }
+                    }
+                }
+            };
+            row_values.push(val);
+        }
+
+        Ok(row_values)
     }
 }
 

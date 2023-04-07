@@ -2,7 +2,7 @@ use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder
 use crate::schema::{Column, Schema};
 use cache::Cache;
 use node::{Internal, Leaf, Node, NodeBody};
-use row::RowCol;
+use row::Row;
 
 pub mod cache;
 mod encode;
@@ -94,57 +94,7 @@ impl<S: TablePageStore> BTree<S> {
             };
 
             for row in rows {
-                let mut row_values = Vec::with_capacity(columns.len());
-
-                for (col, (schema_col, _)) in row.body.iter().zip(self.schema.columns()) {
-                    if !columns.contains(schema_col) {
-                        continue;
-                    }
-
-                    let val = match col {
-                        RowCol::Int(i) => Column::Int(*i),
-                        RowCol::Bool(b) => Column::Bool(*b),
-                        RowCol::VarChar(vc) => {
-                            let mut vc_data = vc.inline.to_vec();
-
-                            if let Some(data_page_id) = vc.next_page {
-                                let mut data_page_id = data_page_id;
-                                loop {
-                                    let vc_page = self.data_cache.get(data_page_id)?;
-
-                                    if vc_page.len() < 4 {
-                                        break;
-                                    }
-
-                                    let next_pointer =
-                                        u32::from_be_bytes(vc_page[..4].try_into().map_err(
-                                            |e: std::array::TryFromSliceError| {
-                                                Error::InvalidColumn(e.to_string())
-                                            },
-                                        )?);
-
-                                    vc_data.extend(&vc_page[4..]);
-
-                                    if next_pointer != 0 {
-                                        data_page_id = next_pointer as usize;
-                                    } else {
-                                        break;
-                                    }
-                                }
-                            }
-
-                            match String::from_utf8(vc_data) {
-                                Ok(s) => Column::VarChar(s),
-                                Err(e) => {
-                                    return Err(Error::InvalidColumn(e.to_string()));
-                                }
-                            }
-                        }
-                    };
-                    row_values.push(val);
-                }
-
-                final_result.push(row_values);
+                final_result.push(row.to_columns(&mut self.data_cache, &self.schema, &columns)?);
             }
 
             leaf_id = match right_sibling {
@@ -188,6 +138,36 @@ impl<S: TablePageStore> BTree<S> {
         }
     }
 
+    pub fn lookup(&mut self, key: &Vec<u8>) -> Result<Option<Vec<Column>>, Error> {
+        let (leaf_id, _) = self.find_containing_leaf(dbg!(key))?;
+
+        let node = self.node_cache.get(dbg!(leaf_id))?;
+
+        let rows = match &node.body {
+            NodeBody::Internal(_) => unreachable!(),
+            NodeBody::Leaf(Leaf { rows, .. }) => rows,
+        };
+
+        dbg!(rows);
+        let i = match rows.binary_search_by_key(key, Row::key) {
+            Ok(i) => i,
+            Err(j) => {
+                dbg!(j);
+                return Ok(None);
+            }
+        };
+
+        let columns: Vec<String> = self
+            .schema
+            .columns()
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        rows[i]
+            .to_columns(&mut self.data_cache, &self.schema, &columns)
+            .map(Some)
+    }
+
     fn commit(&mut self) -> Result<(), Error> {
         self.node_cache.commit()?;
         self.data_cache.commit()
@@ -207,7 +187,7 @@ mod test {
     use super::*;
     use crate::pagestore::MemoryBuilder;
     use crate::schema::ColumnType;
-    use row::Row;
+    use row::{Row, RowCol};
 
     pub(crate) fn leaf_node(
         id: usize,
@@ -242,7 +222,7 @@ mod test {
     }
 
     #[test]
-    fn test_find_containing_leaf_root_is_leaf() {
+    fn test_find_containing_leaf_and_lookup_root_is_leaf() {
         let schema = Schema::new(vec![("foo".into(), ColumnType::Int)]).unwrap();
         let mut store_builder = MemoryBuilder::new(64 * 1024);
         let data_cache = Cache::new(store_builder.build("test").unwrap());
@@ -270,10 +250,16 @@ mod test {
 
         assert_eq!(root_id, leaf_id);
         assert!(parents.is_empty());
+
+        let missing = btree.lookup(&vec![0, 0, 0, 7]).unwrap();
+        assert_eq!(None, missing);
+
+        let found = btree.lookup(&vec![0, 0, 0, 1]).unwrap().unwrap();
+        assert_eq!(vec![Column::Int(1)], found);
     }
 
     #[test]
-    fn test_find_containing_leaf_root_is_internal() {
+    fn test_find_containing_leaf_and_lookup_root_is_internal() {
         let schema = Schema::new(vec![("foo".into(), ColumnType::Int)]).unwrap();
         let mut store_builder = MemoryBuilder::new(64 * 1024);
         let data_cache = Cache::new(store_builder.build("test").unwrap());
@@ -282,10 +268,17 @@ mod test {
         let root_id = node_cache.allocate().unwrap();
         let left_id = node_cache.allocate().unwrap();
         let right_id = node_cache.allocate().unwrap();
+        dbg!(left_id);
+        dbg!(right_id);
         node_cache
             .put(
                 root_id,
-                internal_node(root_id, 10, vec![b"10".to_vec()], vec![left_id, right_id]),
+                internal_node(
+                    root_id,
+                    10,
+                    vec![vec![0, 0, 0, 10]],
+                    vec![left_id, right_id],
+                ),
             )
             .unwrap();
         node_cache
@@ -294,7 +287,7 @@ mod test {
                 leaf_node(
                     left_id,
                     10,
-                    vec![vec![RowCol::Int(1), RowCol::Int(7)]],
+                    vec![vec![RowCol::Int(1)], vec![RowCol::Int(7)]],
                     None,
                 ),
             )
@@ -305,7 +298,7 @@ mod test {
                 leaf_node(
                     right_id,
                     10,
-                    vec![vec![RowCol::Int(10), RowCol::Int(15)]],
+                    vec![vec![RowCol::Int(10)], vec![RowCol::Int(15)]],
                     None,
                 ),
             )
@@ -325,5 +318,17 @@ mod test {
 
         assert_eq!(right_id, leaf_id);
         assert_eq!(vec![root_id], parents);
+
+        let missing = btree.lookup(&vec![0, 0, 0, 9]).unwrap();
+        assert_eq!(None, missing);
+
+        let found = btree.lookup(&vec![0, 0, 0, 1]).unwrap().unwrap();
+        assert_eq!(vec![Column::Int(1)], found);
+        let found = btree.lookup(&vec![0, 0, 0, 7]).unwrap().unwrap();
+        assert_eq!(vec![Column::Int(7)], found);
+        let found = btree.lookup(&vec![0, 0, 0, 10]).unwrap().unwrap();
+        assert_eq!(vec![Column::Int(10)], found);
+        let found = btree.lookup(&vec![0, 0, 0, 15]).unwrap().unwrap();
+        assert_eq!(vec![Column::Int(15)], found);
     }
 }
