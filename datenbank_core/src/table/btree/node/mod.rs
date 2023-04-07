@@ -65,7 +65,7 @@ impl Internal {
         child_id: usize,
         child_key: Vec<u8>,
     ) -> Result<Option<(Vec<u8>, NodeBody)>, Error> {
-        if self.children.len() + 1 <= order {
+        if self.children.len() < order {
             match self.boundary_keys.binary_search(&child_key) {
                 Ok(_) => Err(Error::DuplicateEntry(child_key)),
                 Err(i) => {
@@ -94,7 +94,7 @@ impl Internal {
 
             // insert the new child
             let (boundary_keys, children) =
-                if right_boundary_keys.len() != 0 && child_key < right_boundary_keys[0] {
+                if !right_boundary_keys.is_empty() && child_key < right_boundary_keys[0] {
                     // insert in left sibling
                     (&mut self.boundary_keys, &mut self.children)
                 } else {
@@ -136,7 +136,7 @@ impl Leaf {
     // insert a row into this leaf node, if this node has to split, the new right sibling's body is
     // returned in the option
     pub(crate) fn insert_row(&mut self, order: usize, row: Row) -> Result<Option<NodeBody>, Error> {
-        if self.rows.len() + 1 <= order {
+        if self.rows.len() < order {
             match self.rows.binary_search_by_key(&row.key(), |r| r.key()) {
                 Ok(_) => Err(Error::DuplicateEntry(row.key())),
                 Err(i) => {
@@ -150,7 +150,7 @@ impl Leaf {
             let midpoint = ((self.rows.len() + 1) as f64 / 2.0).ceil() as usize;
             let mut right_sib_rows = self.rows.split_off(midpoint);
 
-            let rows = if right_sib_rows.len() != 0 && row.key() < right_sib_rows[0].key() {
+            let rows = if !right_sib_rows.is_empty() && row.key() < right_sib_rows[0].key() {
                 &mut self.rows
             } else {
                 &mut right_sib_rows

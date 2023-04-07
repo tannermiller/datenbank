@@ -77,8 +77,8 @@ fn where_keyword(input: &str) -> IResult<&str, (&str, &str)> {
 
 fn terminal(input: &str) -> IResult<&str, Terminal> {
     alt((
-        map(identifier, |id| Terminal::Identifier(id)),
-        map(literal, |lit| Terminal::Literal(lit)),
+        map(identifier, Terminal::Identifier),
+        map(literal, Terminal::Literal),
     ))(input)
 }
 
