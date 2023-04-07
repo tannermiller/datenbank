@@ -268,7 +268,7 @@ mod test {
                 )),
             );
             check(
-                &format!("foo             {}    7\n\n", eq_op),
+                &format!("foo             {}    7", eq_op),
                 Some(Expression::Comparison(
                     Terminal::Identifier("foo"),
                     eq_op,

@@ -177,7 +177,6 @@ where
 {
     match (f(input), expected) {
         (Ok((rest, result)), Some(exp)) => {
-            println!("rest: {rest}");
             assert!(rest.is_empty());
             assert_eq!(result, exp);
         }
