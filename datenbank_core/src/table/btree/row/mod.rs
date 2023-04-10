@@ -12,19 +12,19 @@ const MAX_KEY_VAR_CHAR_LEN: usize = 128;
 
 // This holds a single row's worth of data.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Row {
-    pub(crate) body: Vec<RowCol>,
+pub struct Row {
+    pub body: Vec<RowCol>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RowCol {
+pub enum RowCol {
     Int(i32),
     Bool(bool),
     VarChar(RowVarChar),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RowVarChar {
+pub struct RowVarChar {
     pub(crate) inline: Vec<u8>,
     pub(crate) next_page: Option<usize>,
 }

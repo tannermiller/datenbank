@@ -1,5 +1,6 @@
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
 use crate::schema::{Column, Error as SchemaError, Schema};
+use btree::row::Row;
 use btree::{BTree, Error as BTreeError};
 
 pub(crate) mod btree;
@@ -99,8 +100,26 @@ impl<S: TablePageStore> Table<S> {
     }
 
     // Scan the entire table for and return the values for every row for the provided columns.
-    pub fn scan(&mut self, columns: Vec<String>) -> Result<Vec<Vec<Column>>, Error> {
-        self.tree.scan(columns).map_err(Into::into)
+    pub fn scan(
+        &mut self,
+        columns: Vec<String>,
+        rp: impl RowPredicate,
+    ) -> Result<Vec<Vec<Column>>, Error> {
+        self.tree.scan(columns, rp).map_err(Into::into)
+    }
+}
+
+// A RowPredicate is used to select rows to return during a scan;
+pub trait RowPredicate {
+    fn is_satisfied_by(&self, row: &Row) -> bool;
+}
+
+// AllRows is a RowPredicate that matches, and therefore returns, all rows in a table.
+pub struct AllRows;
+
+impl RowPredicate for AllRows {
+    fn is_satisfied_by(&self, _: &Row) -> bool {
+        true
     }
 }
 
@@ -249,11 +268,10 @@ mod test {
         assert!(!internal.children.is_empty());
 
         let values = table
-            .scan(vec![
-                "one".to_string(),
-                "two".to_string(),
-                "three".to_string(),
-            ])
+            .scan(
+                vec!["one".to_string(), "two".to_string(), "three".to_string()],
+                AllRows,
+            )
             .unwrap();
 
         assert_eq!(big_num, values.len());

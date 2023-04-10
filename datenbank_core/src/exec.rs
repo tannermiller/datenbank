@@ -103,7 +103,7 @@ fn select_from<B: TablePageStoreBuilder>(
 
     let expanded_columns = table.schema().expand_select_columns(columns)?;
 
-    let values = table.scan(expanded_columns)?;
+    let values = table.scan(expanded_columns, AllRows)?;
 
     Ok(DatabaseResult::Query(QueryResult { values }))
 }

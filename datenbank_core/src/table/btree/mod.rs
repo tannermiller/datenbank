@@ -1,3 +1,4 @@
+use super::RowPredicate;
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
 use crate::schema::{Column, Schema};
 use cache::Cache;
@@ -65,7 +66,11 @@ impl<S: TablePageStore> BTree<S> {
         })
     }
 
-    pub fn scan(&mut self, columns: Vec<String>) -> Result<Vec<Vec<Column>>, Error> {
+    pub fn scan(
+        &mut self,
+        columns: Vec<String>,
+        rp: impl RowPredicate,
+    ) -> Result<Vec<Vec<Column>>, Error> {
         let root_id = match self.root {
             None => return Ok(vec![]),
             Some(root_id) => root_id,
@@ -94,7 +99,13 @@ impl<S: TablePageStore> BTree<S> {
             };
 
             for row in rows {
-                final_result.push(row.to_columns(&mut self.data_cache, &self.schema, &columns)?);
+                if rp.is_satisfied_by(row) {
+                    final_result.push(row.to_columns(
+                        &mut self.data_cache,
+                        &self.schema,
+                        &columns,
+                    )?);
+                }
             }
 
             leaf_id = match right_sibling {
