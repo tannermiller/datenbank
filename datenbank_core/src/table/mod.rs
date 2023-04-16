@@ -1,5 +1,6 @@
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
 use crate::schema::{Column, Error as SchemaError, Schema};
+use btree::cache::Cache;
 use btree::row::Row;
 use btree::{BTree, Error as BTreeError};
 
@@ -103,22 +104,31 @@ impl<S: TablePageStore> Table<S> {
     pub fn scan(
         &mut self,
         columns: Vec<String>,
-        rp: impl RowPredicate,
+        rp: impl RowPredicate<S>,
     ) -> Result<Vec<Vec<Column>>, Error> {
         self.tree.scan(columns, rp).map_err(Into::into)
+    }
+
+    pub fn lookup(&mut self, key: &Vec<u8>) -> Result<Option<Vec<Column>>, Error> {
+        self.tree.lookup(key).map_err(Into::into)
     }
 }
 
 // A RowPredicate is used to select rows to return during a scan;
-pub trait RowPredicate {
-    fn is_satisfied_by(&self, row: &Row) -> bool;
+pub trait RowPredicate<S: TablePageStore> {
+    fn is_satisfied_by(
+        &self,
+        schema: &Schema,
+        data_cache: &mut Cache<S, Vec<u8>>,
+        row: &Row,
+    ) -> bool;
 }
 
 // AllRows is a RowPredicate that matches, and therefore returns, all rows in a table.
 pub struct AllRows;
 
-impl RowPredicate for AllRows {
-    fn is_satisfied_by(&self, _: &Row) -> bool {
+impl<S: TablePageStore> RowPredicate<S> for AllRows {
+    fn is_satisfied_by(&self, _: &Schema, _: &mut Cache<S, Vec<u8>>, _: &Row) -> bool {
         true
     }
 }

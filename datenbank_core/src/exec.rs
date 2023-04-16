@@ -1,10 +1,12 @@
-use crate::pagestore::{Error as PageStoreError, TablePageStoreBuilder};
+use crate::pagestore::{Error as PageStoreError, TablePageStore, TablePageStoreBuilder};
 use crate::parser::{
     self, ColumnSchema, ColumnType as ParserColumnType, EqualityOp, Expression, Input, Literal,
     LogicalOp, SelectColumns, Terminal as ParserTerm,
 };
 use crate::schema::{Column, ColumnType, Error as SchemaError, Schema};
-use crate::table::{AllRows, Error as TableError, Table};
+use crate::table::btree::cache::Cache;
+use crate::table::btree::row::Row;
+use crate::table::{AllRows, Error as TableError, RowPredicate, Table};
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -111,14 +113,20 @@ fn select_from<B: TablePageStoreBuilder>(
 
     let values = match where_clause {
         Some(wc) => {
-            // TODO: We need to either:
+            // We will either:
             //   1) look for a complete set of key fields connected by AND, these don't need to be
             //      in key order, as long as there is no OR b/w them
             //   2) synthesize the Expression into a form that implements RowPredicate and pass
             //      that into Table::scan()
 
-            let processed = process_expression(wc);
-            todo!()
+            let processed = process_expression(wc)?;
+            match is_key_lookup(table.schema(), &processed) {
+                Some(key) => match table.lookup(&key)? {
+                    Some(res) => vec![res],
+                    None => vec![],
+                },
+                None => table.scan(expanded_columns, processed)?,
+            }
         }
         None => table.scan(expanded_columns, AllRows)?,
     };
@@ -126,7 +134,7 @@ fn select_from<B: TablePageStoreBuilder>(
     Ok(DatabaseResult::Query(QueryResult { values }))
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 enum Terminal {
     Field(String),
     Literal(Literal),
@@ -163,7 +171,7 @@ fn process_expression(expr: Expression) -> Result<Comparison, Error> {
             right: right.into(),
             next: None,
         }),
-        Expression::Logical(left, op, right) => process_logical(left, op, right),
+        Expression::Logical(left, op, right) => process_logical(*left, op, *right),
     }
 }
 
@@ -177,11 +185,11 @@ fn process_comparison(left: ParserTerm, op: EqualityOp, right: ParserTerm) -> Co
 }
 
 fn process_logical(
-    left: Box<Expression>,
+    left: Expression,
     op: LogicalOp,
-    right: Box<Expression>,
+    right: Expression,
 ) -> Result<Comparison, Error> {
-    let mut left = match *left {
+    let mut left = match left {
         Expression::Comparison(l, o, r) => process_comparison(l, o, r),
         Expression::Logical(..) => {
             return Err(Error::InvalidWhereClause(
@@ -190,14 +198,84 @@ fn process_logical(
         }
     };
 
-    let right = match *right {
+    let right = match right {
         Expression::Comparison(l, o, r) => process_comparison(l, o, r),
-        Expression::Logical(l, o, r) => process_logical(l, o, r)?,
+        Expression::Logical(l, o, r) => process_logical(*l, o, *r)?,
     };
 
     left.next = Some(Box::new(Logical { op, right }));
 
     Ok(left)
+}
+
+fn is_key_lookup(schema: &Schema, expr: &Comparison) -> Option<Vec<u8>> {
+    todo!()
+}
+
+impl<S: TablePageStore> RowPredicate<S> for Comparison {
+    fn is_satisfied_by(
+        &self,
+        schema: &Schema,
+        data_cache: &mut Cache<S, Vec<u8>>,
+        row: &Row,
+    ) -> bool {
+        use Terminal::*;
+
+        match (&self.left, self.op, &self.right) {
+            (Field(l), op, Field(r)) => {
+                // TODO: Should is_satisfied_by return a Result<bool>?
+                let cols = row
+                    .to_columns(data_cache, schema, &[l.to_string(), r.to_string()])
+                    .unwrap();
+                evaluate_equality_op(&cols[0], op, &cols[1])
+            }
+            (Field(l), op, Literal(r)) => {
+                // TODO: Should is_satisfied_by return a Result<bool>?
+                let cols = row
+                    .to_columns(data_cache, schema, &[l.to_string()])
+                    .unwrap();
+                let lits = schema
+                    .literals_to_columns(&[l], vec![vec![r.clone()]])
+                    .unwrap();
+
+                evaluate_equality_op(&cols[0], op, &lits[0][0])
+            }
+            (Literal(l), op, Field(r)) => {
+                // TODO: Should is_satisfied_by return a Result<bool>?
+                let lits = schema
+                    .literals_to_columns(&[r], vec![vec![l.clone()]])
+                    .unwrap();
+                let cols = row
+                    .to_columns(data_cache, schema, &[r.to_string()])
+                    .unwrap();
+
+                evaluate_equality_op(&cols[0], op, &lits[0][0])
+            }
+            (l @ Literal(_), op, r @ Literal(_)) => {
+                use EqualityOp::*;
+                match op {
+                    Equal => l == r,
+                    NotEqual => l != r,
+                    GreaterThan => l > r,
+                    GreaterThanOrEqualTo => l >= r,
+                    LessThan => l < r,
+                    LessThanOrEqualTo => l <= r,
+                }
+            }
+        }
+    }
+}
+
+fn evaluate_equality_op(left: &Column, op: EqualityOp, right: &Column) -> bool {
+    use EqualityOp::*;
+    match op {
+        Equal => left == right,
+        NotEqual => left != right,
+        GreaterThan => left > right,
+        GreaterThanOrEqualTo => left >= right,
+        LessThan => left < right,
+        LessThanOrEqualTo => left <= right,
+    }
 }
 
 #[cfg(test)]

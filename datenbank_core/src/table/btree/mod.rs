@@ -69,7 +69,7 @@ impl<S: TablePageStore> BTree<S> {
     pub fn scan(
         &mut self,
         columns: Vec<String>,
-        rp: impl RowPredicate,
+        rp: impl RowPredicate<S>,
     ) -> Result<Vec<Vec<Column>>, Error> {
         let root_id = match self.root {
             None => return Ok(vec![]),
@@ -99,7 +99,7 @@ impl<S: TablePageStore> BTree<S> {
             };
 
             for row in rows {
-                if rp.is_satisfied_by(row) {
+                if rp.is_satisfied_by(&self.schema, &mut self.data_cache, row) {
                     final_result.push(row.to_columns(
                         &mut self.data_cache,
                         &self.schema,

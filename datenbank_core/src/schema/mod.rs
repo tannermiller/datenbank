@@ -236,7 +236,7 @@ impl Schema {
 }
 
 // TODO: Rename this to Value as its independent of the column
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Column {
     // VarChar is variable length string with max length of 65,535.
     VarChar(String),

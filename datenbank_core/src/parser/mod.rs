@@ -52,7 +52,7 @@ pub enum ColumnType {
     Bool,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Literal {
     String(String),
     Int(i32),
