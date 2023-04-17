@@ -121,15 +121,20 @@ pub trait RowPredicate<S: TablePageStore> {
         schema: &Schema,
         data_cache: &mut Cache<S, Vec<u8>>,
         row: &Row,
-    ) -> bool;
+    ) -> Result<bool, Error>;
 }
 
 // AllRows is a RowPredicate that matches, and therefore returns, all rows in a table.
 pub struct AllRows;
 
 impl<S: TablePageStore> RowPredicate<S> for AllRows {
-    fn is_satisfied_by(&self, _: &Schema, _: &mut Cache<S, Vec<u8>>, _: &Row) -> bool {
-        true
+    fn is_satisfied_by(
+        &self,
+        _: &Schema,
+        _: &mut Cache<S, Vec<u8>>,
+        _: &Row,
+    ) -> Result<bool, Error> {
+        Ok(true)
     }
 }
 

@@ -99,7 +99,7 @@ impl<S: TablePageStore> BTree<S> {
             };
 
             for row in rows {
-                if rp.is_satisfied_by(&self.schema, &mut self.data_cache, row) {
+                if rp.is_satisfied_by(&self.schema, &mut self.data_cache, row)? {
                     final_result.push(row.to_columns(
                         &mut self.data_cache,
                         &self.schema,

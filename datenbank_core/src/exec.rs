@@ -218,49 +218,37 @@ impl<S: TablePageStore> RowPredicate<S> for Comparison {
         schema: &Schema,
         data_cache: &mut Cache<S, Vec<u8>>,
         row: &Row,
-    ) -> bool {
+    ) -> Result<bool, TableError> {
         use Terminal::*;
 
         match (&self.left, self.op, &self.right) {
             (Field(l), op, Field(r)) => {
-                // TODO: Should is_satisfied_by return a Result<bool>?
-                let cols = row
-                    .to_columns(data_cache, schema, &[l.to_string(), r.to_string()])
-                    .unwrap();
-                evaluate_equality_op(&cols[0], op, &cols[1])
+                let cols = row.to_columns(data_cache, schema, &[l.to_string(), r.to_string()])?;
+
+                Ok(evaluate_equality_op(&cols[0], op, &cols[1]))
             }
             (Field(l), op, Literal(r)) => {
-                // TODO: Should is_satisfied_by return a Result<bool>?
-                let cols = row
-                    .to_columns(data_cache, schema, &[l.to_string()])
-                    .unwrap();
-                let lits = schema
-                    .literals_to_columns(&[l], vec![vec![r.clone()]])
-                    .unwrap();
+                let cols = row.to_columns(data_cache, schema, &[l.to_string()])?;
+                let lits = schema.literals_to_columns(&[l], vec![vec![r.clone()]])?;
 
-                evaluate_equality_op(&cols[0], op, &lits[0][0])
+                Ok(evaluate_equality_op(&cols[0], op, &lits[0][0]))
             }
             (Literal(l), op, Field(r)) => {
-                // TODO: Should is_satisfied_by return a Result<bool>?
-                let lits = schema
-                    .literals_to_columns(&[r], vec![vec![l.clone()]])
-                    .unwrap();
-                let cols = row
-                    .to_columns(data_cache, schema, &[r.to_string()])
-                    .unwrap();
+                let lits = schema.literals_to_columns(&[r], vec![vec![l.clone()]])?;
+                let cols = row.to_columns(data_cache, schema, &[r.to_string()])?;
 
-                evaluate_equality_op(&cols[0], op, &lits[0][0])
+                Ok(evaluate_equality_op(&cols[0], op, &lits[0][0]))
             }
             (l @ Literal(_), op, r @ Literal(_)) => {
                 use EqualityOp::*;
-                match op {
+                Ok(match op {
                     Equal => l == r,
                     NotEqual => l != r,
                     GreaterThan => l > r,
                     GreaterThanOrEqualTo => l >= r,
                     LessThan => l < r,
                     LessThanOrEqualTo => l <= r,
-                }
+                })
             }
         }
     }
@@ -277,6 +265,8 @@ fn evaluate_equality_op(left: &Column, op: EqualityOp, right: &Column) -> bool {
         LessThanOrEqualTo => left <= right,
     }
 }
+
+// TODO: Test Comparision::is_satisfied_by
 
 #[cfg(test)]
 mod test {
