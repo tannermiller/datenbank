@@ -1,6 +1,6 @@
-use super::row::Row;
 use super::Error;
 use crate::cache::{Error as CacheError, Page};
+use crate::row::Row;
 
 pub(crate) mod encode;
 

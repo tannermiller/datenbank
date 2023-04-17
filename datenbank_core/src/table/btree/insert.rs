@@ -1,7 +1,7 @@
 use super::node::{Internal, Leaf, Node, NodeBody};
-use super::row::{self, Row};
 use super::{BTree, Error};
 use crate::pagestore::TablePageStore;
+use crate::row::{self, Row};
 use crate::schema::Column;
 
 impl<S: TablePageStore> BTree<S> {

@@ -1,7 +1,6 @@
-use crate::cache::Cache;
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
+use crate::row::{Error as RowError, Predicate};
 use crate::schema::{Column, Error as SchemaError, Schema};
-use btree::row::Row;
 use btree::{BTree, Error as BTreeError};
 
 pub(crate) mod btree;
@@ -23,6 +22,8 @@ pub enum Error {
     DecodingError(String),
     #[error("unable to insert row: {0}")]
     InvalidInsert(String),
+    #[error("row error")]
+    Row(#[from] RowError),
 }
 
 // A Table is responsible for the management of everything pertaining to a single database table's
@@ -104,7 +105,7 @@ impl<S: TablePageStore> Table<S> {
     pub fn scan(
         &mut self,
         columns: Vec<String>,
-        rp: impl RowPredicate<S>,
+        rp: impl Predicate<S>,
     ) -> Result<Vec<Vec<Column>>, Error> {
         self.tree.scan(columns, rp).map_err(Into::into)
     }
@@ -114,36 +115,13 @@ impl<S: TablePageStore> Table<S> {
     }
 }
 
-// A RowPredicate is used to select rows to return during a scan;
-pub trait RowPredicate<S: TablePageStore> {
-    fn is_satisfied_by(
-        &self,
-        schema: &Schema,
-        data_cache: &mut Cache<S, Vec<u8>>,
-        row: &Row,
-    ) -> Result<bool, Error>;
-}
-
-// AllRows is a RowPredicate that matches, and therefore returns, all rows in a table.
-pub struct AllRows;
-
-impl<S: TablePageStore> RowPredicate<S> for AllRows {
-    fn is_satisfied_by(
-        &self,
-        _: &Schema,
-        _: &mut Cache<S, Vec<u8>>,
-        _: &Row,
-    ) -> Result<bool, Error> {
-        Ok(true)
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::btree::node::encode::decode_node;
     use super::btree::node::NodeBody;
     use super::*;
     use crate::pagestore::MemoryBuilder;
+    use crate::row::AllRows;
     use crate::schema::{ColumnType, Schema};
 
     #[test]

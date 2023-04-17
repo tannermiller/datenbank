@@ -4,9 +4,9 @@ use crate::parser::{
     self, ColumnSchema, ColumnType as ParserColumnType, EqualityOp, Expression, Input, Literal,
     LogicalOp, SelectColumns, Terminal as ParserTerm,
 };
+use crate::row::{AllRows, Error as RowError, Predicate, Row};
 use crate::schema::{Column, ColumnType, Error as SchemaError, Schema};
-use crate::table::btree::row::Row;
-use crate::table::{AllRows, Error as TableError, RowPredicate, Table};
+use crate::table::{Error as TableError, Table};
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -116,7 +116,7 @@ fn select_from<B: TablePageStoreBuilder>(
             // We will either:
             //   1) look for a complete set of key fields connected by AND, these don't need to be
             //      in key order, as long as there is no OR b/w them
-            //   2) synthesize the Expression into a form that implements RowPredicate and pass
+            //   2) synthesize the Expression into a form that implements Predicate and pass
             //      that into Table::scan()
 
             let processed = process_expression(wc)?;
@@ -212,13 +212,13 @@ fn is_key_lookup(schema: &Schema, expr: &Comparison) -> Option<Vec<u8>> {
     todo!()
 }
 
-impl<S: TablePageStore> RowPredicate<S> for Comparison {
+impl<S: TablePageStore> Predicate<S> for Comparison {
     fn is_satisfied_by(
         &self,
         schema: &Schema,
         data_cache: &mut Cache<S, Vec<u8>>,
         row: &Row,
-    ) -> Result<bool, TableError> {
+    ) -> Result<bool, RowError> {
         use Terminal::*;
 
         match (&self.left, self.op, &self.right) {

@@ -1,11 +1,21 @@
 use std::io::Write;
 
-use super::Error;
-use crate::cache::Cache;
+use crate::cache::{Cache, Error as CacheError};
 use crate::pagestore::TablePageStore;
+use crate::schema::Error as SchemaError;
 use crate::schema::{Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
 
 pub(crate) mod encode;
+
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum Error {
+    #[error("invalid column: {0}")]
+    InvalidColumn(String),
+    #[error("cache error")]
+    Cache(#[from] CacheError),
+    #[error("schema error")]
+    Schema(#[from] SchemaError),
+}
 
 // the max amount of a varchar that is used in the key
 const MAX_KEY_VAR_CHAR_LEN: usize = 128;
@@ -221,6 +231,30 @@ pub(crate) fn process_columns(page_size: usize, cols: Vec<Column>) -> Result<Pro
         .collect::<Result<Vec<(RowCol, Option<Vec<Vec<u8>>>)>, Error>>()?;
 
     Ok(ProcessedRow { columns })
+}
+
+// A Predicate is used to select rows to return during a scan;
+pub trait Predicate<S: TablePageStore> {
+    fn is_satisfied_by(
+        &self,
+        schema: &Schema,
+        data_cache: &mut Cache<S, Vec<u8>>,
+        row: &Row,
+    ) -> Result<bool, Error>;
+}
+
+// AllRows is a Predicate that matches, and therefore returns, all rows in a table.
+pub struct AllRows;
+
+impl<S: TablePageStore> Predicate<S> for AllRows {
+    fn is_satisfied_by(
+        &self,
+        _: &Schema,
+        _: &mut Cache<S, Vec<u8>>,
+        _: &Row,
+    ) -> Result<bool, Error> {
+        Ok(true)
+    }
 }
 
 #[cfg(test)]

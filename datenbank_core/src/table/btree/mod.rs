@@ -1,14 +1,12 @@
-use super::RowPredicate;
 use crate::cache::{Cache, Error as CacheError};
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
+use crate::row::{Error as RowError, Predicate, Row};
 use crate::schema::{Column, Schema};
 use node::{Internal, Leaf, Node, NodeBody};
-use row::Row;
 
 mod encode;
 mod insert;
 pub(crate) mod node;
-pub(crate) mod row;
 
 pub use encode::decode;
 
@@ -18,12 +16,12 @@ pub enum Error {
     Io(#[from] PageError),
     #[error("attempted to insert duplicate entry with key {0:?}")]
     DuplicateEntry(Vec<u8>),
-    #[error("invalid column: {0}")]
-    InvalidColumn(String),
     #[error("empty table")]
     EmptyTable,
     #[error("cache error")]
     Cache(#[from] CacheError),
+    #[error("row error")]
+    Row(#[from] RowError),
 }
 
 // BTRee is a B+ tree that stores the data in a key value store.
@@ -68,7 +66,7 @@ impl<S: TablePageStore> BTree<S> {
     pub fn scan(
         &mut self,
         columns: Vec<String>,
-        rp: impl RowPredicate<S>,
+        rp: impl Predicate<S>,
     ) -> Result<Vec<Vec<Column>>, Error> {
         let root_id = match self.root {
             None => return Ok(vec![]),
@@ -176,6 +174,7 @@ impl<S: TablePageStore> BTree<S> {
         rows[i]
             .to_columns(&mut self.data_cache, &self.schema, &columns)
             .map(Some)
+            .map_err(Into::into)
     }
 
     fn commit(&mut self) -> Result<(), Error> {
@@ -196,8 +195,8 @@ impl<S: TablePageStore> BTree<S> {
 mod test {
     use super::*;
     use crate::pagestore::MemoryBuilder;
+    use crate::row::{Row, RowCol};
     use crate::schema::ColumnType;
-    use row::{Row, RowCol};
 
     pub(crate) fn leaf_node(
         id: usize,
