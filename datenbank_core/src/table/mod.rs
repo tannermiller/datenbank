@@ -1,6 +1,6 @@
+use crate::cache::Cache;
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
 use crate::schema::{Column, Error as SchemaError, Schema};
-use btree::cache::Cache;
 use btree::row::Row;
 use btree::{BTree, Error as BTreeError};
 

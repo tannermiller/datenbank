@@ -1,10 +1,10 @@
+use crate::cache::Cache;
 use crate::pagestore::{Error as PageStoreError, TablePageStore, TablePageStoreBuilder};
 use crate::parser::{
     self, ColumnSchema, ColumnType as ParserColumnType, EqualityOp, Expression, Input, Literal,
     LogicalOp, SelectColumns, Terminal as ParserTerm,
 };
 use crate::schema::{Column, ColumnType, Error as SchemaError, Schema};
-use crate::table::btree::cache::Cache;
 use crate::table::btree::row::Row;
 use crate::table::{AllRows, Error as TableError, RowPredicate, Table};
 

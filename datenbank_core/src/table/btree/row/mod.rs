@@ -1,7 +1,7 @@
 use std::io::Write;
 
-use super::cache::Cache;
 use super::Error;
+use crate::cache::Cache;
 use crate::pagestore::TablePageStore;
 use crate::schema::{Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
 
@@ -141,7 +141,7 @@ impl ProcessedRow {
             };
 
             let page_ids = (0..data_pages.len())
-                .map(|_| cache.allocate())
+                .map(|_| cache.allocate().map_err(Into::into))
                 .collect::<Result<Vec<usize>, Error>>()?;
             let first_next_page = page_ids[0];
             let mut next_page_ids: Vec<Option<usize>> =

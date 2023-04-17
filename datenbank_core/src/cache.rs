@@ -2,8 +2,15 @@ use std::collections::hash_map;
 use std::collections::{HashMap, HashSet};
 use std::mem;
 
-use super::Error;
 use crate::pagestore::{Error as PageError, TablePageStore};
+
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum Error {
+    #[error("io error attempting operation")]
+    Io(#[from] PageError),
+    #[error("unrecoverable error: {0}")]
+    UnrecoverableError(String),
+}
 
 pub trait Page: std::fmt::Debug + Clone {
     fn encode(&self) -> Vec<u8>;

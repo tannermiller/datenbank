@@ -9,8 +9,8 @@ use nom::sequence::pair;
 use nom::IResult;
 
 use super::super::row::encode::{decode_row, encode_row};
-use super::super::Error;
 use super::{Internal, Leaf, Node, NodeBody};
+use crate::cache::Error;
 
 pub(crate) fn encode_node(node: &Node) -> Vec<u8> {
     // we encode the body first even though it goes at the end of the byte vector so that we

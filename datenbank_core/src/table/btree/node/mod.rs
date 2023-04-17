@@ -1,6 +1,6 @@
-use super::cache::Page;
 use super::row::Row;
 use super::Error;
+use crate::cache::{Error as CacheError, Page};
 
 pub(crate) mod encode;
 
@@ -33,7 +33,7 @@ impl Page for Node {
         encode::encode_node(self)
     }
 
-    fn decode(data: &[u8]) -> Result<Self, Error> {
+    fn decode(data: &[u8]) -> Result<Self, CacheError> {
         encode::decode_node(data)
     }
 }

@@ -1,11 +1,10 @@
 use super::RowPredicate;
+use crate::cache::{Cache, Error as CacheError};
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
 use crate::schema::{Column, Schema};
-use cache::Cache;
 use node::{Internal, Leaf, Node, NodeBody};
 use row::Row;
 
-pub mod cache;
 mod encode;
 mod insert;
 pub(crate) mod node;
@@ -23,8 +22,8 @@ pub enum Error {
     InvalidColumn(String),
     #[error("empty table")]
     EmptyTable,
-    #[error("unrecoverable error: {0}")]
-    UnrecoverableError(String),
+    #[error("cache error")]
+    Cache(#[from] CacheError),
 }
 
 // BTRee is a B+ tree that stores the data in a key value store.
@@ -181,7 +180,7 @@ impl<S: TablePageStore> BTree<S> {
 
     fn commit(&mut self) -> Result<(), Error> {
         self.node_cache.commit()?;
-        self.data_cache.commit()
+        self.data_cache.commit().map_err(Into::into)
     }
 
     // The encoding for a BTree is just:

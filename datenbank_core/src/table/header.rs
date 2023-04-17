@@ -6,9 +6,9 @@ use nom::number::complete::{be_u16, be_u8};
 use nom::sequence::tuple;
 use nom::{Err as NomErr, IResult};
 
-use super::btree::cache::Cache;
 use super::btree::{decode as decode_btree, BTree};
 use super::Error;
+use crate::cache::Cache;
 use crate::pagestore::{TablePageStore, TablePageStoreBuilder};
 use crate::parser::identifier_bytes;
 use crate::schema::{decode as decode_schema, Schema};
