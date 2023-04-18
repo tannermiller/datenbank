@@ -134,7 +134,7 @@ fn select_from<B: TablePageStoreBuilder>(
     Ok(DatabaseResult::Query(QueryResult { values }))
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq)]
 enum Terminal {
     Field(String),
     Literal(Literal),
@@ -227,19 +227,22 @@ impl<S: TablePageStore> Predicate<S> for Comparison {
 
                 Ok(evaluate_equality_op(&cols[0], op, &cols[1]))
             }
+
             (Field(l), op, Literal(r)) => {
                 let cols = row.to_columns(data_cache, schema, &[l.to_string()])?;
                 let lits = schema.literals_to_columns(&[l], vec![vec![r.clone()]])?;
 
                 Ok(evaluate_equality_op(&cols[0], op, &lits[0][0]))
             }
+
             (Literal(l), op, Field(r)) => {
                 let lits = schema.literals_to_columns(&[r], vec![vec![l.clone()]])?;
                 let cols = row.to_columns(data_cache, schema, &[r.to_string()])?;
 
                 Ok(evaluate_equality_op(&cols[0], op, &lits[0][0]))
             }
-            (l @ Literal(_), op, r @ Literal(_)) => {
+
+            (Literal(l), op, Literal(r)) => {
                 use EqualityOp::*;
                 Ok(match op {
                     Equal => l == r,
@@ -266,11 +269,11 @@ fn evaluate_equality_op(left: &Column, op: EqualityOp, right: &Column) -> bool {
     }
 }
 
-// TODO: Test Comparision::is_satisfied_by
-
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::pagestore::{Memory, MemoryBuilder};
+    use crate::row::{RowCol, RowVarChar};
 
     #[test]
     fn test_process_expressions() {
@@ -325,5 +328,140 @@ mod test {
                 })),
             }),
         )
+    }
+
+    #[test]
+    fn test_comparison_predicate() {
+        fn check(
+            schema: &Schema,
+            dc: &mut Cache<Memory, Vec<u8>>,
+            comp: Comparison,
+            row: &Row,
+            expect: Option<bool>,
+        ) {
+            match (comp.is_satisfied_by(schema, dc, row), expect) {
+                (Ok(result), Some(exp)) => assert_eq!(result, exp),
+                (Err(_), None) => (),
+                (Ok(_), None) => panic!("test case shouldn't have passed"),
+                (Err(err), Some(_)) => panic!("test case should't have errored: {err}"),
+            }
+        }
+
+        let schema = Schema::new(vec![
+            ("foo".into(), ColumnType::Int),
+            ("bar".into(), ColumnType::Bool),
+            ("qux".into(), ColumnType::VarChar(20)),
+            ("baz".into(), ColumnType::Int),
+        ])
+        .unwrap();
+        let mut store_builder = MemoryBuilder::new(64 * 1024);
+        let mut data_cache = Cache::new(store_builder.build("test").unwrap());
+        let test_row = Row {
+            body: vec![
+                RowCol::Int(7),
+                RowCol::Bool(false),
+                RowCol::VarChar(RowVarChar {
+                    inline: "Hello, World!".into(),
+                    next_page: None,
+                }),
+                RowCol::Int(3),
+            ],
+        };
+
+        let valids = vec![
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::Equal,
+                right: Terminal::Literal(Literal::Int(7)),
+                next: None,
+            },
+            Comparison {
+                left: Terminal::Literal(Literal::Int(7)),
+                op: EqualityOp::Equal,
+                right: Terminal::Field("foo".to_string()),
+                next: None,
+            },
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::LessThan,
+                right: Terminal::Literal(Literal::Int(10)),
+                next: None,
+            },
+            Comparison {
+                left: Terminal::Literal(Literal::Int(10)),
+                op: EqualityOp::LessThanOrEqualTo,
+                right: Terminal::Literal(Literal::Int(10)),
+                next: None,
+            },
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::GreaterThan,
+                right: Terminal::Field("baz".to_string()),
+                next: None,
+            },
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::Equal,
+                right: Terminal::Literal(Literal::Int(7)),
+                next: Some(Box::new(Logical {
+                    op: LogicalOp::And,
+                    right: Comparison {
+                        left: Terminal::Field("qux".to_string()),
+                        op: EqualityOp::LessThan,
+                        right: Terminal::Literal(Literal::String("abc".to_string())),
+                        next: None,
+                    },
+                })),
+            },
+        ];
+
+        let invalids = vec![
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::Equal,
+                right: Terminal::Literal(Literal::Int(8)),
+                next: None,
+            },
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::GreaterThan,
+                right: Terminal::Literal(Literal::Int(10)),
+                next: None,
+            },
+            Comparison {
+                left: Terminal::Literal(Literal::Int(10)),
+                op: EqualityOp::LessThan,
+                right: Terminal::Literal(Literal::Int(10)),
+                next: None,
+            },
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::Equal,
+                right: Terminal::Field("baz".to_string()),
+                next: None,
+            },
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::NotEqual,
+                right: Terminal::Literal(Literal::Int(7)),
+                next: Some(Box::new(Logical {
+                    op: LogicalOp::And,
+                    right: Comparison {
+                        left: Terminal::Field("qux".to_string()),
+                        op: EqualityOp::LessThan,
+                        right: Terminal::Literal(Literal::String("abc".to_string())),
+                        next: None,
+                    },
+                })),
+            },
+        ];
+
+        for valid in valids {
+            check(&schema, &mut data_cache, valid, &test_row, Some(true));
+        }
+
+        for invalid in invalids {
+            check(&schema, &mut data_cache, invalid, &test_row, Some(false));
+        }
     }
 }
