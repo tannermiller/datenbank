@@ -221,38 +221,50 @@ impl<S: TablePageStore> Predicate<S> for Comparison {
     ) -> Result<bool, RowError> {
         use Terminal::*;
 
-        match (&self.left, self.op, &self.right) {
+        let result = match (&self.left, self.op, &self.right) {
             (Field(l), op, Field(r)) => {
                 let cols = row.to_columns(data_cache, schema, &[l.to_string(), r.to_string()])?;
 
-                Ok(evaluate_equality_op(&cols[0], op, &cols[1]))
+                evaluate_equality_op(&cols[0], op, &cols[1])
             }
 
             (Field(l), op, Literal(r)) => {
                 let cols = row.to_columns(data_cache, schema, &[l.to_string()])?;
                 let lits = schema.literals_to_columns(&[l], vec![vec![r.clone()]])?;
 
-                Ok(evaluate_equality_op(&cols[0], op, &lits[0][0]))
+                evaluate_equality_op(&cols[0], op, &lits[0][0])
             }
 
             (Literal(l), op, Field(r)) => {
                 let lits = schema.literals_to_columns(&[r], vec![vec![l.clone()]])?;
                 let cols = row.to_columns(data_cache, schema, &[r.to_string()])?;
 
-                Ok(evaluate_equality_op(&cols[0], op, &lits[0][0]))
+                evaluate_equality_op(&cols[0], op, &lits[0][0])
             }
 
             (Literal(l), op, Literal(r)) => {
                 use EqualityOp::*;
-                Ok(match op {
+                match op {
                     Equal => l == r,
                     NotEqual => l != r,
                     GreaterThan => l > r,
                     GreaterThanOrEqualTo => l >= r,
                     LessThan => l < r,
                     LessThanOrEqualTo => l <= r,
+                }
+            }
+        };
+
+        // recurse down into the next logical op, if it exists
+        match &self.next {
+            Some(log) => {
+                let next_result = log.right.is_satisfied_by(schema, data_cache, row)?;
+                Ok(match log.op {
+                    LogicalOp::And => result && next_result,
+                    LogicalOp::Or => result || next_result,
                 })
             }
+            None => Ok(result),
         }
     }
 }
@@ -413,6 +425,56 @@ mod test {
                     },
                 })),
             },
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::Equal,
+                right: Terminal::Literal(Literal::Int(7)),
+                next: Some(Box::new(Logical {
+                    op: LogicalOp::Or,
+                    right: Comparison {
+                        left: Terminal::Field("qux".to_string()),
+                        op: EqualityOp::NotEqual,
+                        right: Terminal::Literal(Literal::String("abc".to_string())),
+                        next: None,
+                    },
+                })),
+            },
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::Equal,
+                right: Terminal::Literal(Literal::Int(8)),
+                next: Some(Box::new(Logical {
+                    op: LogicalOp::Or,
+                    right: Comparison {
+                        left: Terminal::Field("qux".to_string()),
+                        op: EqualityOp::NotEqual,
+                        right: Terminal::Literal(Literal::String("abc".to_string())),
+                        next: None,
+                    },
+                })),
+            },
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::Equal,
+                right: Terminal::Literal(Literal::Int(7)),
+                next: Some(Box::new(Logical {
+                    op: LogicalOp::And,
+                    right: Comparison {
+                        left: Terminal::Field("qux".to_string()),
+                        op: EqualityOp::LessThan,
+                        right: Terminal::Literal(Literal::String("abc".to_string())),
+                        next: Some(Box::new(Logical {
+                            op: LogicalOp::And,
+                            right: Comparison {
+                                left: Terminal::Field("baz".to_string()),
+                                op: EqualityOp::Equal,
+                                right: Terminal::Literal(Literal::Int(3)),
+                                next: None,
+                            },
+                        })),
+                    },
+                })),
+            },
         ];
 
         let invalids = vec![
@@ -451,6 +513,42 @@ mod test {
                         op: EqualityOp::LessThan,
                         right: Terminal::Literal(Literal::String("abc".to_string())),
                         next: None,
+                    },
+                })),
+            },
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::Equal,
+                right: Terminal::Literal(Literal::Int(7)),
+                next: Some(Box::new(Logical {
+                    op: LogicalOp::And,
+                    right: Comparison {
+                        left: Terminal::Field("qux".to_string()),
+                        op: EqualityOp::Equal,
+                        right: Terminal::Literal(Literal::String("abc".to_string())),
+                        next: None,
+                    },
+                })),
+            },
+            Comparison {
+                left: Terminal::Field("foo".to_string()),
+                op: EqualityOp::Equal,
+                right: Terminal::Literal(Literal::Int(7)),
+                next: Some(Box::new(Logical {
+                    op: LogicalOp::And,
+                    right: Comparison {
+                        left: Terminal::Field("qux".to_string()),
+                        op: EqualityOp::LessThan,
+                        right: Terminal::Literal(Literal::String("abc".to_string())),
+                        next: Some(Box::new(Logical {
+                            op: LogicalOp::And,
+                            right: Comparison {
+                                left: Terminal::Field("baz".to_string()),
+                                op: EqualityOp::NotEqual,
+                                right: Terminal::Literal(Literal::Int(3)),
+                                next: None,
+                            },
+                        })),
                     },
                 })),
             },
