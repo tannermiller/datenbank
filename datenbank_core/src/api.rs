@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use crate::exec::{execute, Error as ExecError};
 use crate::parser::{parse, Error as ParseError};
 
-pub use crate::exec::ExecResult;
+pub use crate::exec::{DatabaseResult, ExecResult, QueryResult};
 pub use crate::pagestore::{FileBuilder, MemoryBuilder, TablePageStoreBuilder};
+pub use crate::schema::Column;
 
 // 16k page sizes for now
 // TODO: How should this be made configurable?
@@ -39,7 +40,7 @@ impl Database<MemoryBuilder> {
 
 impl<B: TablePageStoreBuilder> Database<B> {
     // Execute the provided SQL string against the database.
-    pub fn exec(&mut self, input: &str) -> Result<ExecResult, Error> {
+    pub fn exec(&mut self, input: &str) -> Result<DatabaseResult, Error> {
         let input = parse(input)?;
         execute(&mut self.builder, input).map_err(Into::into)
     }

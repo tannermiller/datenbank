@@ -8,10 +8,12 @@ use nom::{Finish, IResult};
 
 use create_table::create_table;
 use insert_into::insert_into;
+use select_from::select_from;
 
 mod create_table;
 mod insert_into;
 mod literal;
+mod select_from;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
 #[error("error parsing SQL input: {msg}")]
@@ -32,6 +34,11 @@ pub enum Input<'a> {
         columns: Vec<&'a str>,
         values: Vec<Vec<Literal>>,
     },
+    SelectFrom {
+        table_name: &'a str,
+        columns: SelectColumns<'a>,
+        where_clause: Option<Expression<'a>>,
+    },
 }
 
 // The ColumnType and ColumnSchema info is effectively identical to what is in the schema package,
@@ -45,7 +52,7 @@ pub enum ColumnType {
     Bool,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Literal {
     String(String),
     Int(i32),
@@ -77,8 +84,14 @@ impl<'a> ColumnSchema<'a> {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum SelectColumns<'a> {
+    Star,
+    Explicit(Vec<&'a str>),
+}
+
 pub fn parse(input_str: &str) -> Result<Input, Error> {
-    let parse_result = alt((create_table, insert_into))(input_str);
+    let parse_result = alt((create_table, insert_into, select_from))(input_str);
     match parse_result.finish() {
         Ok((_, input)) => Ok(input),
         Err(err) => Err(Error {
@@ -103,6 +116,58 @@ pub fn identifier_bytes(input: &[u8]) -> IResult<&[u8], &[u8]> {
     recognize(pair(alpha1, many0(alt((alphanumeric1, tag("_"))))))(input)
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum EqualityOp {
+    Equal,
+    NotEqual,
+    GreaterThan,
+    GreaterThanOrEqualTo,
+    LessThan,
+    LessThanOrEqualTo,
+}
+
+impl std::fmt::Display for EqualityOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let sign = match self {
+            EqualityOp::Equal => "=",
+            EqualityOp::NotEqual => "!=",
+            EqualityOp::GreaterThan => ">",
+            EqualityOp::GreaterThanOrEqualTo => ">=",
+            EqualityOp::LessThan => "<",
+            EqualityOp::LessThanOrEqualTo => "<=",
+        };
+        write!(f, "{}", sign)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum LogicalOp {
+    And,
+    Or,
+}
+
+impl std::fmt::Display for LogicalOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let sign = match self {
+            LogicalOp::And => "AND",
+            LogicalOp::Or => "OR",
+        };
+        write!(f, "{}", sign)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Expression<'a> {
+    Comparison(Terminal<'a>, EqualityOp, Terminal<'a>),
+    Logical(Box<Expression<'a>>, LogicalOp, Box<Expression<'a>>),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Terminal<'a> {
+    Identifier(&'a str),
+    Literal(Literal),
+}
+
 // this is just a test util that can be shared across all parser testing
 #[cfg(test)]
 fn parse_check<'a, T, F>(f: F, input: &'a str, expected: Option<T>)
@@ -116,8 +181,8 @@ where
             assert_eq!(result, exp);
         }
         (Err(_), None) => (),
-        (Ok(_), None) => panic!("shouldn't have passed"),
-        (Err(err), Some(_)) => panic!("should't have errored: {}", err),
+        (Ok(_), None) => panic!("input \"{input}\" shouldn't have passed"),
+        (Err(err), Some(_)) => panic!("input \"{input}\" should't have errored: {err}"),
     }
 }
 

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::parser::Literal;
+use crate::parser::{Literal, SelectColumns};
 
 mod encode;
 
@@ -204,9 +204,39 @@ impl Schema {
 
         Ok(ordered)
     }
+
+    // valiadate the select from columns and expand a *
+    pub fn expand_select_columns(&self, columns: SelectColumns) -> Result<Vec<String>, Error> {
+        match columns {
+            SelectColumns::Star => Ok(self.columns.iter().map(|(c, _)| c.clone()).collect()),
+            SelectColumns::Explicit(cols) => {
+                let mut result_columns = Vec::with_capacity(cols.len());
+                for col in cols {
+                    let mut found = false;
+                    for (schema_col, _) in &self.columns {
+                        if col == schema_col {
+                            result_columns.push(col.to_string());
+                            found = true;
+                            break;
+                        }
+                    }
+
+                    if !found {
+                        return Err(Error::InvalidColumn(col.to_string()));
+                    }
+                }
+                Ok(result_columns)
+            }
+        }
+    }
+
+    pub fn columns(&self) -> &[(String, ColumnType)] {
+        &self.columns
+    }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+// TODO: Rename this to Value as its independent of the column
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Column {
     // VarChar is variable length string with max length of 65,535.
     VarChar(String),
@@ -245,6 +275,15 @@ impl ColumnType {
                 "unrecognized encoded column type".to_string(),
             )),
         }
+    }
+
+    pub fn is_congruent_literal(&self, lit: &Literal) -> bool {
+        matches!(
+            (self, lit),
+            (ColumnType::VarChar(_), Literal::String(_))
+                | (ColumnType::Int, Literal::Int(_))
+                | (ColumnType::Bool, Literal::Bool(_))
+        )
     }
 }
 
@@ -417,5 +456,46 @@ mod test {
             Column::VarChar("hello".to_string()),
         ]];
         check(&schema, &["qux", "bar", "foo"], cols, Some(correct_cols));
+    }
+
+    #[test]
+    fn test_expand_select_columns() {
+        fn check(schema: &Schema, columns: SelectColumns, expected: Option<Vec<String>>) {
+            let result = schema.expand_select_columns(columns);
+            match (result, expected) {
+                (Ok(cols), Some(exp)) => assert_eq!(exp, cols),
+                (Err(_), None) => (),
+                (Ok(_), None) => panic!("shouldn't have passed"),
+                (Err(err), Some(_)) => panic!("should't have errored: {}", err),
+            }
+        }
+
+        let schema = Schema::new(vec![
+            ("foo".into(), ColumnType::Int),
+            ("bar".into(), ColumnType::Bool),
+            ("qux".into(), ColumnType::VarChar(10)),
+        ])
+        .unwrap();
+
+        check(
+            &schema,
+            SelectColumns::Star,
+            Some(vec![
+                "foo".to_string(),
+                "bar".to_string(),
+                "qux".to_string(),
+            ]),
+        );
+        check(
+            &schema,
+            SelectColumns::Explicit(vec!["foo"]),
+            Some(vec!["foo".to_string()]),
+        );
+        check(&schema, SelectColumns::Explicit(vec!["nope"]), None);
+        check(
+            &schema,
+            SelectColumns::Explicit(vec!["bar", "foo"]),
+            Some(vec!["bar".to_string(), "foo".to_string()]),
+        );
     }
 }

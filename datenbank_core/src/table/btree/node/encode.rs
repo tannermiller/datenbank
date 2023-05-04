@@ -8,9 +8,9 @@ use nom::number::complete::be_u32;
 use nom::sequence::pair;
 use nom::IResult;
 
-use super::super::row::encode::{decode_row, encode_row};
-use super::super::Error;
 use super::{Internal, Leaf, Node, NodeBody};
+use crate::cache::Error;
+use crate::row::encode::{decode_row, encode_row};
 
 pub(crate) fn encode_node(node: &Node) -> Vec<u8> {
     // we encode the body first even though it goes at the end of the byte vector so that we
@@ -184,7 +184,7 @@ mod test {
     use super::*;
 
     use super::super::Leaf;
-    use crate::table::btree::row::{Row, RowCol, RowVarChar};
+    use crate::row::{Row, RowCol, RowVarChar};
 
     #[test]
     fn test_encode_decode_leaf() {

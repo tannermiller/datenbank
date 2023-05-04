@@ -1,6 +1,7 @@
-use super::cache::Page;
-use super::row::Row;
 use super::Error;
+use crate::cache::{Error as CacheError, Page};
+use crate::key;
+use crate::row::Row;
 
 pub(crate) mod encode;
 
@@ -33,7 +34,7 @@ impl Page for Node {
         encode::encode_node(self)
     }
 
-    fn decode(data: &[u8]) -> Result<Self, Error> {
+    fn decode(data: &[u8]) -> Result<Self, CacheError> {
         encode::decode_node(data)
     }
 }
@@ -64,8 +65,8 @@ impl Internal {
         order: usize,
         child_id: usize,
         child_key: Vec<u8>,
-    ) -> Result<Option<NodeBody>, Error> {
-        if self.children.len() + 1 < order {
+    ) -> Result<Option<(Vec<u8>, NodeBody)>, Error> {
+        if self.children.len() < order {
             match self.boundary_keys.binary_search(&child_key) {
                 Ok(_) => Err(Error::DuplicateEntry(child_key)),
                 Err(i) => {
@@ -83,27 +84,43 @@ impl Internal {
             let mut right_sib_children = self.children.split_off(midpoint);
             let mut right_boundary_keys = self.boundary_keys.split_off(midpoint - 1);
 
+            // before split:
+            // boundary_keys =    [ k1 k2 k3 k4 k5 ]
+            // children      = [ c0 c1 c2 c3 c4 c5 ]
+            // midpoint      =            ^
+            //
+            // after split:                   v this key gets removed and passed up
+            // boundary_keys =    [ k1 k2 ] [ k3 k4 k5 ]
+            // children      = [ c0 c1 c2 ] [ c3 c4 c5 ]
+
             // insert the new child
-            let (boundary_keys, children) = if child_key < right_boundary_keys[0] {
-                // insert in left sibling
-                (&mut self.boundary_keys, &mut self.children)
-            } else {
-                // insert in right sibling
-                (&mut right_boundary_keys, &mut right_sib_children)
-            };
+            let (boundary_keys, children) =
+                if !right_boundary_keys.is_empty() && child_key < right_boundary_keys[0] {
+                    // insert in left sibling
+                    (&mut self.boundary_keys, &mut self.children)
+                } else {
+                    // insert in right sibling
+                    (&mut right_boundary_keys, &mut right_sib_children)
+                };
 
             match boundary_keys.binary_search(&child_key) {
                 Ok(_) => return Err(Error::DuplicateEntry(child_key)),
                 Err(i) => {
+                    // inser these at the same index as we'll remove the first boundary key just
+                    // below here to pass it up to the next internal
                     boundary_keys.insert(i, child_key);
-                    children.insert(i + 1, child_id);
+                    children.insert(i, child_id);
                 }
             }
+            let starting_key = right_boundary_keys.remove(0);
 
-            Ok(Some(NodeBody::Internal(Internal {
-                boundary_keys: right_boundary_keys,
-                children: right_sib_children,
-            })))
+            Ok(Some((
+                starting_key,
+                NodeBody::Internal(Internal {
+                    boundary_keys: right_boundary_keys,
+                    children: right_sib_children,
+                }),
+            )))
         }
     }
 }
@@ -120,9 +137,12 @@ impl Leaf {
     // insert a row into this leaf node, if this node has to split, the new right sibling's body is
     // returned in the option
     pub(crate) fn insert_row(&mut self, order: usize, row: Row) -> Result<Option<NodeBody>, Error> {
-        if self.rows.len() + 1 < order {
-            match self.rows.binary_search_by_key(&row.key(), |r| r.key()) {
-                Ok(_) => Err(Error::DuplicateEntry(row.key())),
+        if self.rows.len() < order {
+            match self
+                .rows
+                .binary_search_by_key(&key::build(&row.body), |r| key::build(&r.body))
+            {
+                Ok(_) => Err(Error::DuplicateEntry(key::build(&row.body))),
                 Err(i) => {
                     // don't need to expand, just insert the row and be done
                     self.rows.insert(i, row);
@@ -134,15 +154,18 @@ impl Leaf {
             let midpoint = ((self.rows.len() + 1) as f64 / 2.0).ceil() as usize;
             let mut right_sib_rows = self.rows.split_off(midpoint);
 
-            let rows = if row.key() < right_sib_rows[0].key() {
+            let rows = if !right_sib_rows.is_empty()
+                && key::build(&row.body) < key::build(&right_sib_rows[0].body)
+            {
                 &mut self.rows
             } else {
                 &mut right_sib_rows
             };
 
             // gotta search again because we're not sure what the index is in its new sibling
-            match rows.binary_search_by_key(&row.key(), |r| r.key()) {
-                Ok(_) => return Err(Error::DuplicateEntry(row.key())),
+            let row_key = key::build(&row.body);
+            match rows.binary_search_by_key(&row_key, |r| key::build(&r.body)) {
+                Ok(_) => return Err(Error::DuplicateEntry(row_key)),
                 Err(i) => {
                     // don't need to expand, just insert the row and be done
                     rows.insert(i, row);

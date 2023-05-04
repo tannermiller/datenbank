@@ -1,56 +1,99 @@
 use std::io::Write;
 
-use super::cache::Cache;
-use super::Error;
+use crate::cache::{Cache, Error as CacheError};
 use crate::pagestore::TablePageStore;
-use crate::schema::{Column, MAX_INLINE_VAR_LEN_COL_SIZE};
+use crate::schema::Error as SchemaError;
+use crate::schema::{Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
 
 pub(crate) mod encode;
 
-// the max amount of a varchar that is used in the key
-const MAX_KEY_VAR_CHAR_LEN: usize = 128;
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum Error {
+    #[error("invalid column: {0}")]
+    InvalidColumn(String),
+    #[error("cache error")]
+    Cache(#[from] CacheError),
+    #[error("schema error")]
+    Schema(#[from] SchemaError),
+}
 
 // This holds a single row's worth of data.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Row {
-    pub(crate) body: Vec<RowCol>,
+pub struct Row {
+    pub body: Vec<RowCol>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum RowCol {
+pub enum RowCol {
     Int(i32),
     Bool(bool),
     VarChar(RowVarChar),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RowVarChar {
+pub struct RowVarChar {
     pub(crate) inline: Vec<u8>,
     pub(crate) next_page: Option<usize>,
 }
 
 impl Row {
-    // generate a key string that represents the row
-    pub(crate) fn key(&self) -> Vec<u8> {
-        let mut key = Vec::with_capacity(self.body.len());
+    pub(crate) fn to_columns<S: TablePageStore>(
+        &self,
+        data_cache: &mut Cache<S, Vec<u8>>,
+        schema: &Schema,
+        columns: &[String],
+    ) -> Result<Vec<Column>, Error> {
+        let mut row_values = Vec::with_capacity(columns.len());
 
-        // this is probably not the most efficient way to do this
-        for col in &self.body {
-            match col {
-                RowCol::Int(i) => key.extend(i.to_be_bytes()),
-                RowCol::Bool(b) => key.push(if *b { 1 } else { 0 }),
-                RowCol::VarChar(vc) => {
-                    key.extend(&vc.inline[..vc.inline.len().min(MAX_KEY_VAR_CHAR_LEN)]);
-                }
+        for (col, (schema_col, _)) in self.body.iter().zip(schema.columns()) {
+            if !columns.contains(schema_col) {
+                continue;
             }
 
-            // insert a separator _ between values, the last one will be removed before we return
-            key.push(b'_');
+            let val = match col {
+                RowCol::Int(i) => Column::Int(*i),
+                RowCol::Bool(b) => Column::Bool(*b),
+                RowCol::VarChar(vc) => {
+                    let mut vc_data = vc.inline.to_vec();
+
+                    if let Some(data_page_id) = vc.next_page {
+                        let mut data_page_id = data_page_id;
+                        loop {
+                            let vc_page = data_cache.get(data_page_id)?;
+
+                            if vc_page.len() < 4 {
+                                break;
+                            }
+
+                            let next_pointer =
+                                u32::from_be_bytes(vc_page[..4].try_into().map_err(
+                                    |e: std::array::TryFromSliceError| {
+                                        Error::InvalidColumn(e.to_string())
+                                    },
+                                )?);
+
+                            vc_data.extend(&vc_page[4..]);
+
+                            if next_pointer != 0 {
+                                data_page_id = next_pointer as usize;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+
+                    match String::from_utf8(vc_data) {
+                        Ok(s) => Column::VarChar(s),
+                        Err(e) => {
+                            return Err(Error::InvalidColumn(e.to_string()));
+                        }
+                    }
+                }
+            };
+            row_values.push(val);
         }
 
-        // pop off the last _ that was inserted
-        key.pop();
-        key
+        Ok(row_values)
     }
 }
 
@@ -82,7 +125,7 @@ impl ProcessedRow {
             };
 
             let page_ids = (0..data_pages.len())
-                .map(|_| cache.allocate())
+                .map(|_| cache.allocate().map_err(Into::into))
                 .collect::<Result<Vec<usize>, Error>>()?;
             let first_next_page = page_ids[0];
             let mut next_page_ids: Vec<Option<usize>> =
@@ -162,6 +205,30 @@ pub(crate) fn process_columns(page_size: usize, cols: Vec<Column>) -> Result<Pro
         .collect::<Result<Vec<(RowCol, Option<Vec<Vec<u8>>>)>, Error>>()?;
 
     Ok(ProcessedRow { columns })
+}
+
+// A Predicate is used to select rows to return during a scan;
+pub trait Predicate<S: TablePageStore> {
+    fn is_satisfied_by(
+        &self,
+        schema: &Schema,
+        data_cache: &mut Cache<S, Vec<u8>>,
+        row: &Row,
+    ) -> Result<bool, Error>;
+}
+
+// AllRows is a Predicate that matches, and therefore returns, all rows in a table.
+pub struct AllRows;
+
+impl<S: TablePageStore> Predicate<S> for AllRows {
+    fn is_satisfied_by(
+        &self,
+        _: &Schema,
+        _: &mut Cache<S, Vec<u8>>,
+        _: &Row,
+    ) -> Result<bool, Error> {
+        Ok(true)
+    }
 }
 
 #[cfg(test)]
