@@ -101,4 +101,33 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>) {
         ],
         query_result(result).values
     );
+
+    let result = db.exec("SELECT * FROM testing WHERE foo = 1").unwrap();
+    assert_eq!(
+        vec![vec![
+            Column::Int(1),
+            Column::Bool(false),
+            Column::VarChar("hello".to_string()),
+        ]],
+        query_result(result).values
+    );
+
+    let result = db.exec("SELECT * FROM testing WHERE foo = 1").unwrap();
+    assert_eq!(
+        vec![vec![
+            Column::Int(1),
+            Column::Bool(false),
+            Column::VarChar("hello".to_string()),
+        ]],
+        query_result(result).values
+    );
+
+    let result = db.exec("SELECT baz FROM testing WHERE foo < 3").unwrap();
+    assert_eq!(
+        vec![
+            vec![Column::VarChar("hello".to_string()),],
+            vec![Column::VarChar("world".to_string()),]
+        ],
+        query_result(result).values
+    );
 }
