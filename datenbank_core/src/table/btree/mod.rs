@@ -1,6 +1,7 @@
 use crate::cache::{Cache, Error as CacheError};
+use crate::key;
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
-use crate::row::{Error as RowError, Predicate, Row};
+use crate::row::{Error as RowError, Predicate};
 use crate::schema::{Column, Schema};
 use node::{Internal, Leaf, Node, NodeBody};
 
@@ -157,7 +158,7 @@ impl<S: TablePageStore> BTree<S> {
         };
 
         dbg!(rows);
-        let i = match rows.binary_search_by_key(key, Row::key) {
+        let i = match rows.binary_search_by_key(key, |r| key::build(&r.body)) {
             Ok(i) => i,
             Err(j) => {
                 dbg!(j);

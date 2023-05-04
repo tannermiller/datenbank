@@ -17,9 +17,6 @@ pub enum Error {
     Schema(#[from] SchemaError),
 }
 
-// the max amount of a varchar that is used in the key
-const MAX_KEY_VAR_CHAR_LEN: usize = 128;
-
 // This holds a single row's worth of data.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
@@ -40,29 +37,6 @@ pub struct RowVarChar {
 }
 
 impl Row {
-    // generate a key string that represents the row
-    pub(crate) fn key(&self) -> Vec<u8> {
-        let mut key = Vec::with_capacity(self.body.len());
-
-        // this is probably not the most efficient way to do this
-        for col in &self.body {
-            match col {
-                RowCol::Int(i) => key.extend(i.to_be_bytes()),
-                RowCol::Bool(b) => key.push(if *b { 1 } else { 0 }),
-                RowCol::VarChar(vc) => {
-                    key.extend(&vc.inline[..vc.inline.len().min(MAX_KEY_VAR_CHAR_LEN)]);
-                }
-            }
-
-            // insert a separator _ between values, the last one will be removed before we return
-            key.push(b'_');
-        }
-
-        // pop off the last _ that was inserted
-        key.pop();
-        key
-    }
-
     pub(crate) fn to_columns<S: TablePageStore>(
         &self,
         data_cache: &mut Cache<S, Vec<u8>>,

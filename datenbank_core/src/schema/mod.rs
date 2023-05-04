@@ -276,6 +276,15 @@ impl ColumnType {
             )),
         }
     }
+
+    pub fn is_congruent_literal(&self, lit: &Literal) -> bool {
+        matches!(
+            (self, lit),
+            (ColumnType::VarChar(_), Literal::String(_))
+                | (ColumnType::Int, Literal::Int(_))
+                | (ColumnType::Bool, Literal::Bool(_))
+        )
+    }
 }
 
 impl std::fmt::Display for ColumnType {

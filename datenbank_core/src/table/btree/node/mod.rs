@@ -1,5 +1,6 @@
 use super::Error;
 use crate::cache::{Error as CacheError, Page};
+use crate::key;
 use crate::row::Row;
 
 pub(crate) mod encode;
@@ -137,8 +138,11 @@ impl Leaf {
     // returned in the option
     pub(crate) fn insert_row(&mut self, order: usize, row: Row) -> Result<Option<NodeBody>, Error> {
         if self.rows.len() < order {
-            match self.rows.binary_search_by_key(&row.key(), |r| r.key()) {
-                Ok(_) => Err(Error::DuplicateEntry(row.key())),
+            match self
+                .rows
+                .binary_search_by_key(&key::build(&row.body), |r| key::build(&r.body))
+            {
+                Ok(_) => Err(Error::DuplicateEntry(key::build(&row.body))),
                 Err(i) => {
                     // don't need to expand, just insert the row and be done
                     self.rows.insert(i, row);
@@ -150,15 +154,18 @@ impl Leaf {
             let midpoint = ((self.rows.len() + 1) as f64 / 2.0).ceil() as usize;
             let mut right_sib_rows = self.rows.split_off(midpoint);
 
-            let rows = if !right_sib_rows.is_empty() && row.key() < right_sib_rows[0].key() {
+            let rows = if !right_sib_rows.is_empty()
+                && key::build(&row.body) < key::build(&right_sib_rows[0].body)
+            {
                 &mut self.rows
             } else {
                 &mut right_sib_rows
             };
 
             // gotta search again because we're not sure what the index is in its new sibling
-            match rows.binary_search_by_key(&row.key(), |r| r.key()) {
-                Ok(_) => return Err(Error::DuplicateEntry(row.key())),
+            let row_key = key::build(&row.body);
+            match rows.binary_search_by_key(&row_key, |r| key::build(&r.body)) {
+                Ok(_) => return Err(Error::DuplicateEntry(row_key)),
                 Err(i) => {
                     // don't need to expand, just insert the row and be done
                     rows.insert(i, row);

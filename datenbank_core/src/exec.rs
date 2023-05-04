@@ -1,4 +1,5 @@
 use crate::cache::Cache;
+use crate::key;
 use crate::pagestore::{Error as PageStoreError, TablePageStore, TablePageStoreBuilder};
 use crate::parser::{
     self, ColumnSchema, ColumnType as ParserColumnType, EqualityOp, Expression, Input, Literal,
@@ -208,8 +209,58 @@ fn process_logical(
     Ok(left)
 }
 
+// Determine if this comparison is a direct key lookup (i.e. contains a complete key) for a key
+// defined in the schema.
 fn is_key_lookup(schema: &Schema, expr: &Comparison) -> Option<Vec<u8>> {
-    todo!()
+    // TODO:If we have a complete key and still more comparisons, do we do a lookup and apply a
+    // predicate?
+
+    // This should be the key len once we have keys that are less than the full schema.
+    let mut key_parts = vec![None; schema.len()];
+
+    let mut comp = expr;
+    loop {
+        if comp.op != EqualityOp::Equal {
+            return None;
+        }
+
+        let (id, lit) = match (&comp.left, &comp.right) {
+            (Terminal::Field(id), Terminal::Literal(lit))
+            | (Terminal::Literal(lit), Terminal::Field(id)) => (id, lit),
+            _ => return None,
+        };
+
+        let mut found = false;
+        for (i, (col, ct)) in schema.columns().iter().enumerate() {
+            if id == col && ct.is_congruent_literal(lit) {
+                key_parts[i] = Some(lit);
+                found = true;
+            }
+        }
+
+        // This is just until we start implementing key prefixes or something else that would allow it
+        // to be ok to not find it.
+        if !found {
+            return None;
+        }
+
+        match &comp.next {
+            Some(log) if log.op == LogicalOp::And => {
+                comp = &log.right;
+            }
+            _ => break,
+        }
+    }
+
+    let mut found_key_parts = Vec::with_capacity(schema.len());
+    for kp in key_parts {
+        match kp {
+            Some(kp) => found_key_parts.push(kp),
+            None => return None,
+        };
+    }
+
+    Some(key::build(&found_key_parts))
 }
 
 impl<S: TablePageStore> Predicate<S> for Comparison {
@@ -561,5 +612,143 @@ mod test {
         for invalid in invalids {
             check(&schema, &mut data_cache, invalid, &test_row, Some(false));
         }
+    }
+
+    #[test]
+    fn test_is_key_lookup() {
+        let one_field_schema = Schema::new(vec![("foo".into(), ColumnType::Int)]).unwrap();
+        assert_eq!(
+            None,
+            is_key_lookup(
+                &one_field_schema,
+                &Comparison {
+                    left: Terminal::Field("foo".to_string()),
+                    op: EqualityOp::LessThan,
+                    right: Terminal::Literal(Literal::Int(7)),
+                    next: None,
+                }
+            )
+        );
+        assert_eq!(
+            Some(vec![0, 0, 0, 7]),
+            is_key_lookup(
+                &one_field_schema,
+                &Comparison {
+                    left: Terminal::Field("foo".to_string()),
+                    op: EqualityOp::Equal,
+                    right: Terminal::Literal(Literal::Int(7)),
+                    next: None,
+                }
+            )
+        );
+
+        let multi_field_schema = Schema::new(vec![
+            ("foo".into(), ColumnType::Int),
+            ("bar".into(), ColumnType::Bool),
+            ("qux".into(), ColumnType::VarChar(20)),
+        ])
+        .unwrap();
+        assert_eq!(
+            None,
+            is_key_lookup(
+                &multi_field_schema,
+                &Comparison {
+                    left: Terminal::Field("foo".to_string()),
+                    op: EqualityOp::LessThan,
+                    right: Terminal::Literal(Literal::Int(7)),
+                    next: None,
+                }
+            )
+        );
+        assert_eq!(
+            None,
+            is_key_lookup(
+                &multi_field_schema,
+                &Comparison {
+                    left: Terminal::Field("foo".to_string()),
+                    op: EqualityOp::Equal,
+                    right: Terminal::Literal(Literal::Int(7)),
+                    next: None,
+                }
+            )
+        );
+        assert_eq!(
+            None,
+            is_key_lookup(
+                &multi_field_schema,
+                &Comparison {
+                    left: Terminal::Field("foo".to_string()),
+                    op: EqualityOp::Equal,
+                    right: Terminal::Literal(Literal::Int(7)),
+                    next: Some(Box::new(Logical {
+                        op: LogicalOp::And,
+                        right: Comparison {
+                            left: Terminal::Field("bar".to_string()),
+                            op: EqualityOp::Equal,
+                            right: Terminal::Literal(Literal::Bool(true)),
+                            next: None,
+                        }
+                    })),
+                }
+            )
+        );
+        assert_eq!(
+            Some(vec![
+                0, 0, 0, 7, b'_', 1, b'_', b'k', b'a', b'b', b'o', b'o', b'm'
+            ]),
+            is_key_lookup(
+                &multi_field_schema,
+                &Comparison {
+                    left: Terminal::Field("foo".to_string()),
+                    op: EqualityOp::Equal,
+                    right: Terminal::Literal(Literal::Int(7)),
+                    next: Some(Box::new(Logical {
+                        op: LogicalOp::And,
+                        right: Comparison {
+                            left: Terminal::Field("bar".to_string()),
+                            op: EqualityOp::Equal,
+                            right: Terminal::Literal(Literal::Bool(true)),
+                            next: Some(Box::new(Logical {
+                                op: LogicalOp::And,
+                                right: Comparison {
+                                    left: Terminal::Field("qux".to_string()),
+                                    op: EqualityOp::Equal,
+                                    right: Terminal::Literal(Literal::String("kaboom".to_string())),
+                                    next: None,
+                                }
+                            })),
+                        }
+                    })),
+                }
+            )
+        );
+        assert_eq!(
+            None,
+            is_key_lookup(
+                &multi_field_schema,
+                &Comparison {
+                    left: Terminal::Field("foo".to_string()),
+                    op: EqualityOp::Equal,
+                    right: Terminal::Literal(Literal::Int(7)),
+                    next: Some(Box::new(Logical {
+                        op: LogicalOp::And,
+                        right: Comparison {
+                            left: Terminal::Field("bar".to_string()),
+                            op: EqualityOp::Equal,
+                            right: Terminal::Literal(Literal::Bool(true)),
+                            next: Some(Box::new(Logical {
+                                op: LogicalOp::And,
+                                right: Comparison {
+                                    left: Terminal::Field("qux".to_string()),
+                                    op: EqualityOp::GreaterThan,
+                                    right: Terminal::Literal(Literal::String("kaboom".to_string())),
+                                    next: None,
+                                }
+                            })),
+                        }
+                    })),
+                }
+            )
+        );
     }
 }

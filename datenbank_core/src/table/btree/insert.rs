@@ -1,5 +1,6 @@
 use super::node::{Internal, Leaf, Node, NodeBody};
 use super::{BTree, Error};
+use crate::key;
 use crate::pagestore::TablePageStore;
 use crate::row::{self, Row};
 use crate::schema::Column;
@@ -64,7 +65,7 @@ impl<S: TablePageStore> BTree<S> {
         //   * If we walk all the way up the parent chain then we've split the root and must create
         //     a new root with the old root and the new sibling as its children.
 
-        let (leaf_id, path) = self.find_containing_leaf(&row.key())?;
+        let (leaf_id, path) = self.find_containing_leaf(&key::build(&row.body))?;
 
         let leaf_node = self.node_cache.get_mut(leaf_id)?;
 
@@ -82,7 +83,7 @@ impl<S: TablePageStore> BTree<S> {
         // sibling. new_child_id will be the var that we use to communicate up each level of the
         // internal nodes to indicate a newly inserted split node.
         let mut new_child_key = match &body {
-            NodeBody::Leaf(Leaf { rows, .. }) => rows[0].key(),
+            NodeBody::Leaf(Leaf { rows, .. }) => key::build(&rows[0].body),
             _ => unreachable!(), // We know this is a leaf since we just split a leaf
         };
         let mut new_child_id = self.node_cache.allocate()?;
