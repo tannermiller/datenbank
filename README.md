@@ -5,10 +5,10 @@ This is a toy database that I'm building just to learn more about how databases 
 ## TODO/Priorities
 
 1) ~B+ Tre~
-2) Simple parser & executor for:
+2) ~Simple parser & executor for:~
     1) ~CREATE TABLE~
     2) ~INSERT INTO~
-    3) SELECT FROM
+    3) ~SELECT FROM~
 3) ~File persistence~
 4) Primary Keys (other than treating the whole row as the primary)
 5) Write Ahead Log
