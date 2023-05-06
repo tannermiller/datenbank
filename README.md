@@ -11,9 +11,9 @@ This is a toy database that I'm building just to learn more about how databases 
     3) ~SELECT FROM~
 3) ~File persistence~
 4) Primary Keys (other than treating the whole row as the primary)
-5) Write Ahead Log
-6) Joins
-7) Table Indices
+5) Table Indices
+6) Write Ahead Log
+7) Joins
 8) Concurrency Support
     1) Transactions
     2) Row & Table Locks
