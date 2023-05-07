@@ -27,7 +27,8 @@ pub struct Error {
 pub enum Input<'a> {
     Create {
         table_name: &'a str,
-        schema: Vec<ColumnSchema<'a>>,
+        columns: Vec<ColumnSchema<'a>>,
+        primary_key: Option<Vec<&'a str>>,
     },
     InsertInto {
         table_name: &'a str,

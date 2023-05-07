@@ -43,7 +43,11 @@ pub fn execute<B: TablePageStoreBuilder>(
     input: Input,
 ) -> Result<DatabaseResult, Error> {
     match input {
-        Input::Create { table_name, schema } => create_table(store_builder, table_name, schema),
+        Input::Create {
+            table_name,
+            columns,
+            primary_key,
+        } => create_table(store_builder, table_name, columns, primary_key),
         Input::InsertInto {
             table_name,
             columns,
@@ -60,9 +64,11 @@ pub fn execute<B: TablePageStoreBuilder>(
 fn create_table<B: TablePageStoreBuilder>(
     store_builder: &mut B,
     table_name: &str,
-    schema: Vec<ColumnSchema>,
+    columns: Vec<ColumnSchema>,
+    primary_key: Option<Vec<&str>>,
 ) -> Result<DatabaseResult, Error> {
-    let schema = parser_schema_to_table_schema(schema)?;
+    // TODO: primary_key
+    let schema = parser_schema_to_table_schema(columns)?;
     Table::create(table_name.to_string(), schema, store_builder)?;
     Ok(DatabaseResult::Exec(ExecResult { rows_affected: 0 }))
 }
