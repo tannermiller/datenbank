@@ -67,13 +67,15 @@ fn create_table<B: TablePageStoreBuilder>(
     columns: Vec<ColumnSchema>,
     primary_key: Option<Vec<&str>>,
 ) -> Result<DatabaseResult, Error> {
-    // TODO: primary_key
-    let schema = parser_schema_to_table_schema(columns)?;
+    let schema = parser_schema_to_table_schema(columns, primary_key)?;
     Table::create(table_name.to_string(), schema, store_builder)?;
     Ok(DatabaseResult::Exec(ExecResult { rows_affected: 0 }))
 }
 
-fn parser_schema_to_table_schema(parser_schema: Vec<ColumnSchema>) -> Result<Schema, Error> {
+fn parser_schema_to_table_schema(
+    parser_schema: Vec<ColumnSchema>,
+    primary_key: Option<Vec<&str>>,
+) -> Result<Schema, Error> {
     let columns = parser_schema
         .into_iter()
         .map(|ps| {
