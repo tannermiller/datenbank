@@ -205,7 +205,7 @@ impl Schema {
         Ok(ordered)
     }
 
-    // valiadate the select from columns and expand a *
+    // validate the select from columns and expand a *
     pub fn expand_select_columns(&self, columns: SelectColumns) -> Result<Vec<String>, Error> {
         match columns {
             SelectColumns::Star => Ok(self.columns.iter().map(|(c, _)| c.clone()).collect()),
