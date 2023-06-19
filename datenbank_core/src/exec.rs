@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::cache::Cache;
 use crate::key;
 use crate::pagestore::{Error as PageStoreError, TablePageStore, TablePageStoreBuilder};
@@ -137,14 +139,14 @@ fn select_from<B: TablePageStoreBuilder>(
 
 #[derive(Clone, Debug, PartialEq)]
 enum Terminal {
-    Field(String),
+    Field(Rc<String>),
     Literal(Literal),
 }
 
 impl From<parser::Terminal<'_>> for Terminal {
     fn from(t: parser::Terminal) -> Terminal {
         match t {
-            parser::Terminal::Identifier(id) => Terminal::Field(id.to_string()),
+            parser::Terminal::Identifier(id) => Terminal::Field(id.to_string().into()),
             parser::Terminal::Literal(lit) => Terminal::Literal(lit),
         }
     }
@@ -274,13 +276,13 @@ impl<S: TablePageStore> Predicate<S> for Comparison {
 
         let result = match (&self.left, self.op, &self.right) {
             (Field(l), op, Field(r)) => {
-                let cols = row.to_columns(data_cache, schema, &[l.to_string(), r.to_string()])?;
+                let cols = row.to_columns(data_cache, schema, &[l.clone(), r.clone()])?;
 
                 evaluate_equality_op(&cols[0], op, &cols[1])
             }
 
             (Field(l), op, Literal(r)) => {
-                let cols = row.to_columns(data_cache, schema, &[l.to_string()])?;
+                let cols = row.to_columns(data_cache, schema, &[l.clone()])?;
                 let lits = schema.literals_to_columns(&[l], vec![vec![r.clone()]])?;
 
                 evaluate_equality_op(&cols[0], op, &lits[0][0])
@@ -288,7 +290,7 @@ impl<S: TablePageStore> Predicate<S> for Comparison {
 
             (Literal(l), op, Field(r)) => {
                 let lits = schema.literals_to_columns(&[r], vec![vec![l.clone()]])?;
-                let cols = row.to_columns(data_cache, schema, &[r.to_string()])?;
+                let cols = row.to_columns(data_cache, schema, &[r.clone()])?;
 
                 evaluate_equality_op(&cols[0], op, &lits[0][0])
             }
@@ -356,7 +358,7 @@ mod test {
                 ParserTerm::Literal(Literal::Int(7)),
             ),
             Some(Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::Equal,
                 right: Terminal::Literal(Literal::Int(7)),
                 next: None,
@@ -377,13 +379,13 @@ mod test {
                 )),
             ),
             Some(Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::Equal,
                 right: Terminal::Literal(Literal::Int(7)),
                 next: Some(Box::new(Logical {
                     op: LogicalOp::And,
                     right: Comparison {
-                        left: Terminal::Field("bar".to_string()),
+                        left: Terminal::Field("bar".to_string().into()),
                         op: EqualityOp::LessThan,
                         right: Terminal::Literal(Literal::String("joe".to_string())),
                         next: None,
@@ -433,7 +435,7 @@ mod test {
 
         let valids = vec![
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::Equal,
                 right: Terminal::Literal(Literal::Int(7)),
                 next: None,
@@ -441,11 +443,11 @@ mod test {
             Comparison {
                 left: Terminal::Literal(Literal::Int(7)),
                 op: EqualityOp::Equal,
-                right: Terminal::Field("foo".to_string()),
+                right: Terminal::Field("foo".to_string().into()),
                 next: None,
             },
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::LessThan,
                 right: Terminal::Literal(Literal::Int(10)),
                 next: None,
@@ -457,19 +459,19 @@ mod test {
                 next: None,
             },
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::GreaterThan,
-                right: Terminal::Field("baz".to_string()),
+                right: Terminal::Field("baz".to_string().into()),
                 next: None,
             },
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::Equal,
                 right: Terminal::Literal(Literal::Int(7)),
                 next: Some(Box::new(Logical {
                     op: LogicalOp::And,
                     right: Comparison {
-                        left: Terminal::Field("qux".to_string()),
+                        left: Terminal::Field("qux".to_string().into()),
                         op: EqualityOp::LessThan,
                         right: Terminal::Literal(Literal::String("abc".to_string())),
                         next: None,
@@ -477,13 +479,13 @@ mod test {
                 })),
             },
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::Equal,
                 right: Terminal::Literal(Literal::Int(7)),
                 next: Some(Box::new(Logical {
                     op: LogicalOp::Or,
                     right: Comparison {
-                        left: Terminal::Field("qux".to_string()),
+                        left: Terminal::Field("qux".to_string().into()),
                         op: EqualityOp::NotEqual,
                         right: Terminal::Literal(Literal::String("abc".to_string())),
                         next: None,
@@ -491,13 +493,13 @@ mod test {
                 })),
             },
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::Equal,
                 right: Terminal::Literal(Literal::Int(8)),
                 next: Some(Box::new(Logical {
                     op: LogicalOp::Or,
                     right: Comparison {
-                        left: Terminal::Field("qux".to_string()),
+                        left: Terminal::Field("qux".to_string().into()),
                         op: EqualityOp::NotEqual,
                         right: Terminal::Literal(Literal::String("abc".to_string())),
                         next: None,
@@ -505,19 +507,19 @@ mod test {
                 })),
             },
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::Equal,
                 right: Terminal::Literal(Literal::Int(7)),
                 next: Some(Box::new(Logical {
                     op: LogicalOp::And,
                     right: Comparison {
-                        left: Terminal::Field("qux".to_string()),
+                        left: Terminal::Field("qux".to_string().into()),
                         op: EqualityOp::LessThan,
                         right: Terminal::Literal(Literal::String("abc".to_string())),
                         next: Some(Box::new(Logical {
                             op: LogicalOp::And,
                             right: Comparison {
-                                left: Terminal::Field("baz".to_string()),
+                                left: Terminal::Field("baz".to_string().into()),
                                 op: EqualityOp::Equal,
                                 right: Terminal::Literal(Literal::Int(3)),
                                 next: None,
@@ -530,13 +532,13 @@ mod test {
 
         let invalids = vec![
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::Equal,
                 right: Terminal::Literal(Literal::Int(8)),
                 next: None,
             },
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::GreaterThan,
                 right: Terminal::Literal(Literal::Int(10)),
                 next: None,
@@ -548,19 +550,19 @@ mod test {
                 next: None,
             },
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::Equal,
-                right: Terminal::Field("baz".to_string()),
+                right: Terminal::Field("baz".to_string().into()),
                 next: None,
             },
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::NotEqual,
                 right: Terminal::Literal(Literal::Int(7)),
                 next: Some(Box::new(Logical {
                     op: LogicalOp::And,
                     right: Comparison {
-                        left: Terminal::Field("qux".to_string()),
+                        left: Terminal::Field("qux".to_string().into()),
                         op: EqualityOp::LessThan,
                         right: Terminal::Literal(Literal::String("abc".to_string())),
                         next: None,
@@ -568,13 +570,13 @@ mod test {
                 })),
             },
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::Equal,
                 right: Terminal::Literal(Literal::Int(7)),
                 next: Some(Box::new(Logical {
                     op: LogicalOp::And,
                     right: Comparison {
-                        left: Terminal::Field("qux".to_string()),
+                        left: Terminal::Field("qux".to_string().into()),
                         op: EqualityOp::Equal,
                         right: Terminal::Literal(Literal::String("abc".to_string())),
                         next: None,
@@ -582,19 +584,19 @@ mod test {
                 })),
             },
             Comparison {
-                left: Terminal::Field("foo".to_string()),
+                left: Terminal::Field("foo".to_string().into()),
                 op: EqualityOp::Equal,
                 right: Terminal::Literal(Literal::Int(7)),
                 next: Some(Box::new(Logical {
                     op: LogicalOp::And,
                     right: Comparison {
-                        left: Terminal::Field("qux".to_string()),
+                        left: Terminal::Field("qux".to_string().into()),
                         op: EqualityOp::LessThan,
                         right: Terminal::Literal(Literal::String("abc".to_string())),
                         next: Some(Box::new(Logical {
                             op: LogicalOp::And,
                             right: Comparison {
-                                left: Terminal::Field("baz".to_string()),
+                                left: Terminal::Field("baz".to_string().into()),
                                 op: EqualityOp::NotEqual,
                                 right: Terminal::Literal(Literal::Int(3)),
                                 next: None,
@@ -622,7 +624,7 @@ mod test {
             is_key_lookup(
                 &one_field_schema,
                 &Comparison {
-                    left: Terminal::Field("foo".to_string()),
+                    left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::LessThan,
                     right: Terminal::Literal(Literal::Int(7)),
                     next: None,
@@ -634,7 +636,7 @@ mod test {
             is_key_lookup(
                 &one_field_schema,
                 &Comparison {
-                    left: Terminal::Field("foo".to_string()),
+                    left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
                     right: Terminal::Literal(Literal::Int(7)),
                     next: None,
@@ -653,7 +655,7 @@ mod test {
             is_key_lookup(
                 &multi_field_schema,
                 &Comparison {
-                    left: Terminal::Field("foo".to_string()),
+                    left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::LessThan,
                     right: Terminal::Literal(Literal::Int(7)),
                     next: None,
@@ -665,7 +667,7 @@ mod test {
             is_key_lookup(
                 &multi_field_schema,
                 &Comparison {
-                    left: Terminal::Field("foo".to_string()),
+                    left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
                     right: Terminal::Literal(Literal::Int(7)),
                     next: None,
@@ -677,13 +679,13 @@ mod test {
             is_key_lookup(
                 &multi_field_schema,
                 &Comparison {
-                    left: Terminal::Field("foo".to_string()),
+                    left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
                     right: Terminal::Literal(Literal::Int(7)),
                     next: Some(Box::new(Logical {
                         op: LogicalOp::And,
                         right: Comparison {
-                            left: Terminal::Field("bar".to_string()),
+                            left: Terminal::Field("bar".to_string().into()),
                             op: EqualityOp::Equal,
                             right: Terminal::Literal(Literal::Bool(true)),
                             next: None,
@@ -699,19 +701,19 @@ mod test {
             is_key_lookup(
                 &multi_field_schema,
                 &Comparison {
-                    left: Terminal::Field("foo".to_string()),
+                    left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
                     right: Terminal::Literal(Literal::Int(7)),
                     next: Some(Box::new(Logical {
                         op: LogicalOp::And,
                         right: Comparison {
-                            left: Terminal::Field("bar".to_string()),
+                            left: Terminal::Field("bar".to_string().into()),
                             op: EqualityOp::Equal,
                             right: Terminal::Literal(Literal::Bool(true)),
                             next: Some(Box::new(Logical {
                                 op: LogicalOp::And,
                                 right: Comparison {
-                                    left: Terminal::Field("qux".to_string()),
+                                    left: Terminal::Field("qux".to_string().into()),
                                     op: EqualityOp::Equal,
                                     right: Terminal::Literal(Literal::String("kaboom".to_string())),
                                     next: None,
@@ -727,19 +729,19 @@ mod test {
             is_key_lookup(
                 &multi_field_schema,
                 &Comparison {
-                    left: Terminal::Field("foo".to_string()),
+                    left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
                     right: Terminal::Literal(Literal::Int(7)),
                     next: Some(Box::new(Logical {
                         op: LogicalOp::And,
                         right: Comparison {
-                            left: Terminal::Field("bar".to_string()),
+                            left: Terminal::Field("bar".to_string().into()),
                             op: EqualityOp::Equal,
                             right: Terminal::Literal(Literal::Bool(true)),
                             next: Some(Box::new(Logical {
                                 op: LogicalOp::And,
                                 right: Comparison {
-                                    left: Terminal::Field("qux".to_string()),
+                                    left: Terminal::Field("qux".to_string().into()),
                                     op: EqualityOp::GreaterThan,
                                     right: Terminal::Literal(Literal::String("kaboom".to_string())),
                                     next: None,

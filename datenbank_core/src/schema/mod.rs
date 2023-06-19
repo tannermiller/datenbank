@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use crate::parser::{Literal, SelectColumns};
 
@@ -24,17 +25,22 @@ pub enum Error {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Schema {
     // each column has a name a data type
-    columns: Vec<(String, ColumnType)>,
+    columns: Vec<(Rc<String>, ColumnType)>,
 }
 
 impl Schema {
     // Create a new Schema. Validate that the schema is valid.
-    pub fn new(columns: Vec<(String, ColumnType)>) -> Result<Self, Error> {
+    pub fn new(column_definitions: Vec<(String, ColumnType)>) -> Result<Self, Error> {
         let mut col_names = HashSet::new();
-        for (name, _) in columns.iter() {
-            if !col_names.insert(name) {
+        let mut columns = Vec::with_capacity(column_definitions.len());
+        for (name, ct) in column_definitions
+            .into_iter()
+            .map(|(s, ct)| (Rc::new(s), ct))
+        {
+            if !col_names.insert(name.clone()) {
                 return Err(Error::NonUniqueColumn(name.to_string()));
             }
+            columns.push((name, ct));
         }
         Ok(Schema { columns })
     }
@@ -81,7 +87,7 @@ impl Schema {
         for column in column_order {
             let mut found_column = None;
             for (col_name, col) in self.columns.iter() {
-                if col_name == column {
+                if &**col_name == column {
                     found_column = Some(col);
                     break;
                 }
@@ -170,7 +176,7 @@ impl Schema {
         for co in column_order {
             let mut found = false;
             for (i, (col_name, _)) in self.columns.iter().enumerate() {
-                if co == col_name {
+                if co == &**col_name {
                     ordering.push(i);
                     found = true;
                     break;
@@ -206,7 +212,7 @@ impl Schema {
     }
 
     // validate the select from columns and expand a *
-    pub fn expand_select_columns(&self, columns: SelectColumns) -> Result<Vec<String>, Error> {
+    pub fn expand_select_columns(&self, columns: SelectColumns) -> Result<Vec<Rc<String>>, Error> {
         match columns {
             SelectColumns::Star => Ok(self.columns.iter().map(|(c, _)| c.clone()).collect()),
             SelectColumns::Explicit(cols) => {
@@ -214,8 +220,8 @@ impl Schema {
                 for col in cols {
                     let mut found = false;
                     for (schema_col, _) in &self.columns {
-                        if col == schema_col {
-                            result_columns.push(col.to_string());
+                        if col == **schema_col {
+                            result_columns.push(schema_col.clone());
                             found = true;
                             break;
                         }
@@ -230,7 +236,7 @@ impl Schema {
         }
     }
 
-    pub fn columns(&self) -> &[(String, ColumnType)] {
+    pub fn columns(&self) -> &[(Rc<String>, ColumnType)] {
         &self.columns
     }
 }
@@ -460,7 +466,7 @@ mod test {
 
     #[test]
     fn test_expand_select_columns() {
-        fn check(schema: &Schema, columns: SelectColumns, expected: Option<Vec<String>>) {
+        fn check(schema: &Schema, columns: SelectColumns, expected: Option<Vec<Rc<String>>>) {
             let result = schema.expand_select_columns(columns);
             match (result, expected) {
                 (Ok(cols), Some(exp)) => assert_eq!(exp, cols),
@@ -481,21 +487,21 @@ mod test {
             &schema,
             SelectColumns::Star,
             Some(vec![
-                "foo".to_string(),
-                "bar".to_string(),
-                "qux".to_string(),
+                Rc::new("foo".to_string()),
+                Rc::new("bar".to_string()),
+                Rc::new("qux".to_string()),
             ]),
         );
         check(
             &schema,
             SelectColumns::Explicit(vec!["foo"]),
-            Some(vec!["foo".to_string()]),
+            Some(vec![Rc::new("foo".to_string())]),
         );
         check(&schema, SelectColumns::Explicit(vec!["nope"]), None);
         check(
             &schema,
             SelectColumns::Explicit(vec!["bar", "foo"]),
-            Some(vec!["bar".to_string(), "foo".to_string()]),
+            Some(vec![Rc::new("bar".to_string()), Rc::new("foo".to_string())]),
         );
     }
 }

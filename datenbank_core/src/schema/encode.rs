@@ -43,7 +43,7 @@ fn encode_column_type(name: &str, column: &ColumnType, bytes: &mut Vec<u8>) {
 
 pub fn decode(input: &[u8]) -> IResult<&[u8], Schema> {
     map(length_count(be_u16, parse_column_type), |columns| Schema {
-        columns,
+        columns: columns.into_iter().map(|(c, ct)| (c.into(), ct)).collect(),
     })(input)
 }
 

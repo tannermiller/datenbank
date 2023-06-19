@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::cache::{Cache, Error as CacheError};
 use crate::key;
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
@@ -66,7 +68,7 @@ impl<S: TablePageStore> BTree<S> {
 
     pub fn scan(
         &mut self,
-        columns: Vec<String>,
+        columns: Vec<Rc<String>>,
         rp: impl Predicate<S>,
     ) -> Result<Vec<Vec<Column>>, Error> {
         let root_id = match self.root {
@@ -166,7 +168,7 @@ impl<S: TablePageStore> BTree<S> {
             }
         };
 
-        let columns: Vec<String> = self
+        let columns: Vec<Rc<String>> = self
             .schema
             .columns()
             .iter()

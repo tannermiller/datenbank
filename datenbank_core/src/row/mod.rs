@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::rc::Rc;
 
 use crate::cache::{Cache, Error as CacheError};
 use crate::pagestore::TablePageStore;
@@ -41,7 +42,7 @@ impl Row {
         &self,
         data_cache: &mut Cache<S, Vec<u8>>,
         schema: &Schema,
-        columns: &[String],
+        columns: &[Rc<String>],
     ) -> Result<Vec<Column>, Error> {
         let mut row_values = Vec::with_capacity(columns.len());
 

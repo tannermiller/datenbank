@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
 use crate::row::{Error as RowError, Predicate};
 use crate::schema::{Column, Error as SchemaError, Schema};
@@ -104,7 +106,7 @@ impl<S: TablePageStore> Table<S> {
     // Scan the entire table for and return the values for every row for the provided columns.
     pub fn scan(
         &mut self,
-        columns: Vec<String>,
+        columns: Vec<Rc<String>>,
         rp: impl Predicate<S>,
     ) -> Result<Vec<Vec<Column>>, Error> {
         self.tree.scan(columns, rp).map_err(Into::into)
@@ -262,7 +264,10 @@ mod test {
 
         let values = table
             .scan(
-                vec!["one".to_string(), "two".to_string(), "three".to_string()],
+                vec!["one", "two", "three"]
+                    .into_iter()
+                    .map(|s| s.to_string().into())
+                    .collect(),
                 AllRows,
             )
             .unwrap();
