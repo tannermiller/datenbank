@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::parser::{Literal, SelectColumns};
@@ -19,6 +19,8 @@ pub enum Error {
     UnableToDecode(String),
     #[error("invalid column {0}")]
     InvalidColumn(String),
+    #[error("invalid primary key column {0}")]
+    InvalidPrimaryKeyColumn(String),
 }
 
 // The schema describes the columns that make each row in the table.
@@ -26,27 +28,45 @@ pub enum Error {
 pub struct Schema {
     // each column has a name a data type
     columns: Vec<(Rc<String>, ColumnType)>,
+    primary_key: Option<Vec<Rc<String>>>,
 }
 
 impl Schema {
     // Create a new Schema. Validate that the schema is valid.
-    pub fn new(column_definitions: Vec<(String, ColumnType)>) -> Result<Self, Error> {
-        let mut col_names = HashSet::new();
+    pub fn new(
+        column_definitions: Vec<(String, ColumnType)>,
+        primary_key_def: Option<Vec<&str>>,
+    ) -> Result<Self, Error> {
+        let mut col_names = HashMap::new();
         let mut columns = Vec::with_capacity(column_definitions.len());
         for (name, ct) in column_definitions
             .into_iter()
             .map(|(s, ct)| (Rc::new(s), ct))
         {
-            if !col_names.insert(name.clone()) {
+            if col_names.insert(name.to_string(), name.clone()).is_some() {
                 return Err(Error::NonUniqueColumn(name.to_string()));
             }
-            columns.push((name, ct));
+            columns.push((name.clone(), ct));
         }
-        Ok(Schema { columns })
-    }
 
-    pub fn len(&self) -> usize {
-        self.columns.len()
+        let primary_key = match primary_key_def {
+            Some(pks) => {
+                let mut primary_cols = Vec::with_capacity(pks.len());
+                for pk in pks {
+                    match col_names.get(pk) {
+                        Some(col) => primary_cols.push(col.clone()),
+                        None => return Err(Error::InvalidPrimaryKeyColumn(pk.to_string())),
+                    }
+                }
+                Some(primary_cols)
+            }
+            None => None,
+        };
+
+        Ok(Schema {
+            columns,
+            primary_key,
+        })
     }
 
     // The encoded Schema has the following format:
@@ -58,6 +78,10 @@ impl Schema {
     //     - for statically sized columns (e.g. Int, Bool), nothing else is encoded
     //     - for variable length columns (e.g. VarChar), the max len is encoded in however many
     //       bytes it requires
+    //   - if the primary key is set, then 2 bytes to store the number of primary key items
+    //   - each primary key entry is encoded as:
+    //     - 2 bytes for the length of the name of the column
+    //     - the bytes for the name of the column
     pub fn encode(&self) -> Vec<u8> {
         encode::encode(self)
     }
@@ -239,6 +263,10 @@ impl Schema {
     pub fn columns(&self) -> &[(Rc<String>, ColumnType)] {
         &self.columns
     }
+
+    pub fn primary_key(&self) -> Option<&Vec<Rc<String>>> {
+        self.primary_key.as_ref()
+    }
 }
 
 // TODO: Rename this to Value as its independent of the column
@@ -309,10 +337,13 @@ mod test {
 
     #[test]
     fn test_schema_non_unique_column() {
-        let res = Schema::new(vec![
-            ("foo".into(), ColumnType::Int),
-            ("foo".into(), ColumnType::Bool),
-        ]);
+        let res = Schema::new(
+            vec![
+                ("foo".into(), ColumnType::Int),
+                ("foo".into(), ColumnType::Bool),
+            ],
+            None,
+        );
         assert_eq!(Err(Error::NonUniqueColumn("foo".into())), res);
     }
 
@@ -333,11 +364,14 @@ mod test {
             }
         }
 
-        let schema = Schema::new(vec![
-            ("foo".into(), ColumnType::Int),
-            ("bar".into(), ColumnType::Bool),
-            ("qux".into(), ColumnType::VarChar(10)),
-        ])
+        let schema = Schema::new(
+            vec![
+                ("foo".into(), ColumnType::Int),
+                ("bar".into(), ColumnType::Bool),
+                ("qux".into(), ColumnType::VarChar(10)),
+            ],
+            None,
+        )
         .unwrap();
 
         check(&schema, &vec![], vec![], None);
@@ -391,20 +425,26 @@ mod test {
         }
 
         check(
-            &Schema::new(vec![
-                ("foo".into(), ColumnType::Int),
-                ("bar".into(), ColumnType::Bool),
-                ("qux".into(), ColumnType::VarChar(10)),
-            ])
+            &Schema::new(
+                vec![
+                    ("foo".into(), ColumnType::Int),
+                    ("bar".into(), ColumnType::Bool),
+                    ("qux".into(), ColumnType::VarChar(10)),
+                ],
+                None,
+            )
             .unwrap(),
             28,
         );
         check(
-            &Schema::new(vec![
-                ("foo".into(), ColumnType::Int),
-                ("bar".into(), ColumnType::Bool),
-                ("qux".into(), ColumnType::VarChar(1024)),
-            ])
+            &Schema::new(
+                vec![
+                    ("foo".into(), ColumnType::Int),
+                    ("bar".into(), ColumnType::Bool),
+                    ("qux".into(), ColumnType::VarChar(1024)),
+                ],
+                None,
+            )
             .unwrap(),
             530,
         );
@@ -427,11 +467,14 @@ mod test {
             }
         }
 
-        let schema = Schema::new(vec![
-            ("foo".into(), ColumnType::Int),
-            ("bar".into(), ColumnType::Bool),
-            ("qux".into(), ColumnType::VarChar(10)),
-        ])
+        let schema = Schema::new(
+            vec![
+                ("foo".into(), ColumnType::Int),
+                ("bar".into(), ColumnType::Bool),
+                ("qux".into(), ColumnType::VarChar(10)),
+            ],
+            None,
+        )
         .unwrap();
 
         let cols = vec![vec![
@@ -476,11 +519,14 @@ mod test {
             }
         }
 
-        let schema = Schema::new(vec![
-            ("foo".into(), ColumnType::Int),
-            ("bar".into(), ColumnType::Bool),
-            ("qux".into(), ColumnType::VarChar(10)),
-        ])
+        let schema = Schema::new(
+            vec![
+                ("foo".into(), ColumnType::Int),
+                ("bar".into(), ColumnType::Bool),
+                ("qux".into(), ColumnType::VarChar(10)),
+            ],
+            None,
+        )
         .unwrap();
 
         check(

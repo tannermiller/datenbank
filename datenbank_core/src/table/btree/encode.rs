@@ -50,7 +50,7 @@ mod test {
         let mut store_builder = MemoryBuilder::new(64 * 1024);
         let empty_tree = BTree {
             name: "something".to_string(),
-            schema: Schema::new(vec![]).unwrap(),
+            schema: Schema::new(vec![], None).unwrap(),
             order: 1000,
             root: None,
             node_cache: Cache::new(store_builder.build("something").unwrap()),
@@ -61,7 +61,7 @@ mod test {
 
         let filled_tree = BTree {
             name: "something".to_string(),
-            schema: Schema::new(vec![]).unwrap(),
+            schema: Schema::new(vec![], None).unwrap(),
             order: 1000,
             root: Some(7),
             node_cache: Cache::new(store_builder.build("something").unwrap()),

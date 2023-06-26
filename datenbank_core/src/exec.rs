@@ -88,7 +88,7 @@ fn parser_schema_to_table_schema(
         })
         .collect();
 
-    Schema::new(columns).map_err(Into::into)
+    Schema::new(columns, primary_key).map_err(Into::into)
 }
 
 fn insert_into<B: TablePageStoreBuilder>(
@@ -225,8 +225,25 @@ fn is_key_lookup(schema: &Schema, expr: &Comparison) -> Option<Vec<u8>> {
     // TODO:If we have a complete key and still more comparisons, do we do a lookup and apply a
     // predicate?
 
+    let key_fields: Vec<&(Rc<String>, ColumnType)> = if let Some(pk) = schema.primary_key() {
+        pk.iter()
+            .map(|k| {
+                for col @ (col_name, _) in schema.columns() {
+                    if col_name == k {
+                        return col;
+                    }
+                }
+
+                // we've already validated that the key definitely exists in the columns
+                unreachable!()
+            })
+            .collect()
+    } else {
+        schema.columns().iter().collect()
+    };
+
     // This should be the key len once we have keys that are less than the full schema.
-    let mut key_parts = vec![None; schema.len()];
+    let mut key_parts = vec![None; key_fields.len()];
 
     let mut comp = expr;
     loop {
@@ -241,7 +258,7 @@ fn is_key_lookup(schema: &Schema, expr: &Comparison) -> Option<Vec<u8>> {
         };
 
         let mut found = false;
-        for (i, (col, ct)) in schema.columns().iter().enumerate() {
+        for (i, (col, ct)) in key_fields.iter().enumerate() {
             if id == col && ct.is_congruent_literal(lit) {
                 key_parts[i] = Some(lit);
                 found = true;
@@ -262,7 +279,7 @@ fn is_key_lookup(schema: &Schema, expr: &Comparison) -> Option<Vec<u8>> {
         }
     }
 
-    let mut found_key_parts = Vec::with_capacity(schema.len());
+    let mut found_key_parts = Vec::with_capacity(key_fields.len());
     for kp in key_parts {
         match kp {
             Some(kp) => found_key_parts.push(kp),
@@ -348,6 +365,8 @@ mod test {
     use crate::pagestore::{Memory, MemoryBuilder};
     use crate::row::{RowCol, RowVarChar};
 
+    // TODO: Test with primary_keys
+
     #[test]
     fn test_process_expressions() {
         fn check(expr: Expression, expect: Option<Comparison>) {
@@ -420,12 +439,15 @@ mod test {
             }
         }
 
-        let schema = Schema::new(vec![
-            ("foo".into(), ColumnType::Int),
-            ("bar".into(), ColumnType::Bool),
-            ("qux".into(), ColumnType::VarChar(20)),
-            ("baz".into(), ColumnType::Int),
-        ])
+        let schema = Schema::new(
+            vec![
+                ("foo".into(), ColumnType::Int),
+                ("bar".into(), ColumnType::Bool),
+                ("qux".into(), ColumnType::VarChar(20)),
+                ("baz".into(), ColumnType::Int),
+            ],
+            None,
+        )
         .unwrap();
         let mut store_builder = MemoryBuilder::new(64 * 1024);
         let mut data_cache = Cache::new(store_builder.build("test").unwrap());
@@ -626,7 +648,7 @@ mod test {
 
     #[test]
     fn test_is_key_lookup() {
-        let one_field_schema = Schema::new(vec![("foo".into(), ColumnType::Int)]).unwrap();
+        let one_field_schema = Schema::new(vec![("foo".into(), ColumnType::Int)], None).unwrap();
         assert_eq!(
             None,
             is_key_lookup(
@@ -652,16 +674,19 @@ mod test {
             )
         );
 
-        let multi_field_schema = Schema::new(vec![
-            ("foo".into(), ColumnType::Int),
-            ("bar".into(), ColumnType::Bool),
-            ("qux".into(), ColumnType::VarChar(20)),
-        ])
+        let multi_field_schema_no_primary_key = Schema::new(
+            vec![
+                ("foo".into(), ColumnType::Int),
+                ("bar".into(), ColumnType::Bool),
+                ("qux".into(), ColumnType::VarChar(20)),
+            ],
+            None,
+        )
         .unwrap();
         assert_eq!(
             None,
             is_key_lookup(
-                &multi_field_schema,
+                &multi_field_schema_no_primary_key,
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::LessThan,
@@ -673,7 +698,7 @@ mod test {
         assert_eq!(
             None,
             is_key_lookup(
-                &multi_field_schema,
+                &multi_field_schema_no_primary_key,
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
@@ -685,7 +710,7 @@ mod test {
         assert_eq!(
             None,
             is_key_lookup(
-                &multi_field_schema,
+                &multi_field_schema_no_primary_key,
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
@@ -707,7 +732,7 @@ mod test {
                 0, 0, 0, 7, b'_', 1, b'_', b'k', b'a', b'b', b'o', b'o', b'm'
             ]),
             is_key_lookup(
-                &multi_field_schema,
+                &multi_field_schema_no_primary_key,
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
@@ -735,7 +760,7 @@ mod test {
         assert_eq!(
             None,
             is_key_lookup(
-                &multi_field_schema,
+                &multi_field_schema_no_primary_key,
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
@@ -755,6 +780,60 @@ mod test {
                                     next: None,
                                 }
                             })),
+                        }
+                    })),
+                }
+            )
+        );
+
+        let multi_field_schema_with_primary_key = Schema::new(
+            vec![
+                ("foo".into(), ColumnType::Int),
+                ("bar".into(), ColumnType::Bool),
+                ("qux".into(), ColumnType::VarChar(20)),
+            ],
+            Some(vec!["foo".into(), "bar".into()]),
+        )
+        .unwrap();
+        assert_eq!(
+            None,
+            is_key_lookup(
+                &multi_field_schema_with_primary_key,
+                &Comparison {
+                    left: Terminal::Field("foo".to_string().into()),
+                    op: EqualityOp::LessThan,
+                    right: Terminal::Literal(Literal::Int(7)),
+                    next: None,
+                }
+            )
+        );
+        assert_eq!(
+            None,
+            is_key_lookup(
+                &multi_field_schema_with_primary_key,
+                &Comparison {
+                    left: Terminal::Field("foo".to_string().into()),
+                    op: EqualityOp::Equal,
+                    right: Terminal::Literal(Literal::Int(7)),
+                    next: None,
+                }
+            )
+        );
+        assert_eq!(
+            Some(vec![0, 0, 0, 7, b'_', 1,]),
+            is_key_lookup(
+                &multi_field_schema_with_primary_key,
+                &Comparison {
+                    left: Terminal::Field("foo".to_string().into()),
+                    op: EqualityOp::Equal,
+                    right: Terminal::Literal(Literal::Int(7)),
+                    next: Some(Box::new(Logical {
+                        op: LogicalOp::And,
+                        right: Comparison {
+                            left: Terminal::Field("bar".to_string().into()),
+                            op: EqualityOp::Equal,
+                            right: Terminal::Literal(Literal::Bool(true)),
+                            next: None,
                         }
                     })),
                 }

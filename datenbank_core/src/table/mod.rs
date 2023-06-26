@@ -129,11 +129,14 @@ mod test {
     #[test]
     fn test_create_and_load() {
         let name = "babies_first_table".to_string();
-        let schema = Schema::new(vec![
-            ("sugar".into(), ColumnType::Int),
-            ("spice".into(), ColumnType::VarChar(10)),
-            ("everything_nice".into(), ColumnType::Bool),
-        ])
+        let schema = Schema::new(
+            vec![
+                ("sugar".into(), ColumnType::Int),
+                ("spice".into(), ColumnType::VarChar(10)),
+                ("everything_nice".into(), ColumnType::Bool),
+            ],
+            None,
+        )
         .unwrap();
         let mut store_builder = MemoryBuilder::new(1024 * 64);
 
@@ -175,11 +178,14 @@ mod test {
     #[test]
     fn test_insert() {
         let name = "inserting_is_awesome".to_string();
-        let schema = Schema::new(vec![
-            ("zero".into(), ColumnType::Int),
-            ("one".into(), ColumnType::VarChar(10)),
-            ("infinity".into(), ColumnType::Bool),
-        ])
+        let schema = Schema::new(
+            vec![
+                ("zero".into(), ColumnType::Int),
+                ("one".into(), ColumnType::VarChar(10)),
+                ("infinity".into(), ColumnType::Bool),
+            ],
+            None,
+        )
         .unwrap();
         let mut store_builder = MemoryBuilder::new(1024 * 64);
 
@@ -220,11 +226,14 @@ mod test {
     #[test]
     fn test_big_table() {
         let name = "big_inserts".to_string();
-        let schema = Schema::new(vec![
-            ("one".into(), ColumnType::Int),
-            ("two".into(), ColumnType::VarChar(512)),
-            ("three".into(), ColumnType::Bool),
-        ])
+        let schema = Schema::new(
+            vec![
+                ("one".into(), ColumnType::Int),
+                ("two".into(), ColumnType::VarChar(512)),
+                ("three".into(), ColumnType::Bool),
+            ],
+            None,
+        )
         .unwrap();
         let mut store_builder = MemoryBuilder::new(1024 * 16);
         let mut table = Table::create(name.clone(), schema.clone(), &mut store_builder).unwrap();
