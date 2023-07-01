@@ -1,5 +1,6 @@
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::{char, multispace0, multispace1, space1};
+use nom::combinator::all_consuming;
 use nom::multi::many0;
 use nom::sequence::{delimited, pair, tuple};
 use nom::IResult;
@@ -9,13 +10,13 @@ use super::{identifier, Input, Literal};
 
 // parse a sql statement like "INSERT INTO foo (col1, col2) VALUES (val1, val2), (val3, val4)"
 pub fn insert_into(input: &str) -> IResult<&str, Input> {
-    let (rest, (table_name, _, columns, _, values)) = tuple((
+    let (rest, (table_name, _, columns, _, values)) = all_consuming(tuple((
         prefix_with_table,
         multispace1,
         column_names,
         pair(tag_no_case("values"), multispace1),
         values_multi,
-    ))(input)?;
+    )))(input)?;
     Ok((
         rest,
         Input::InsertInto {

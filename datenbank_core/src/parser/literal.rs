@@ -12,7 +12,7 @@ pub fn literal(input: &str) -> IResult<&str, Literal> {
     alt((parse_bool, parse_int, parse_string))(input)
 }
 
-fn parse_bool(input: &str) -> IResult<&str, Literal> {
+pub fn parse_bool(input: &str) -> IResult<&str, Literal> {
     let (rest, bool_val) = alt((
         value(true, tag_no_case("true")),
         value(false, tag_no_case("false")),

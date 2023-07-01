@@ -1,23 +1,23 @@
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{multispace0, multispace1, space1};
-use nom::combinator::{map, opt, value};
+use nom::combinator::{all_consuming, map, opt, value};
 use nom::error::{make_error, ErrorKind};
 use nom::multi::many0;
 use nom::sequence::{delimited, pair, tuple};
 use nom::{Err as NomErr, IResult};
 
-use super::literal::literal;
+use super::literal::{literal, parse_bool};
 use super::{identifier, EqualityOp, Expression, Input, LogicalOp, SelectColumns, Terminal};
 
 pub fn select_from(input: &str) -> IResult<&str, Input> {
-    let (rest, (_, columns, _, table_name, where_clause)) = tuple((
+    let (rest, (_, columns, _, table_name, where_clause)) = all_consuming(tuple((
         select_keyword,
         columns,
         from_keyword,
         table_name,
         where_clause,
-    ))(input)?;
+    )))(input)?;
 
     Ok((
         rest,
@@ -77,6 +77,8 @@ fn where_keyword(input: &str) -> IResult<&str, (&str, &str)> {
 
 fn terminal(input: &str) -> IResult<&str, Terminal> {
     alt((
+        // gotta explicitly check for true/false first as they are otherwise valid identifiers
+        map(parse_bool, Terminal::Literal),
         map(identifier, Terminal::Identifier),
         map(literal, Terminal::Literal),
     ))(input)
@@ -226,6 +228,7 @@ mod test {
                 where_clause: None,
             }),
         );
+        check("SELECT foo FROM testing WHERE AND bar = false", None);
     }
 
     #[test]
@@ -285,6 +288,7 @@ mod test {
         }
 
         check("nope", None);
+        check("AND foo = true", None);
         check(
             "foo = 7",
             Some(Expression::Comparison(
@@ -294,12 +298,36 @@ mod test {
             )),
         );
         check(
+            "foo = false",
+            Some(Expression::Comparison(
+                Terminal::Identifier("foo"),
+                EqualityOp::Equal,
+                Terminal::Literal(Literal::Bool(false)),
+            )),
+        );
+        check(
             "foo = 7 AND bar > 2",
             Some(Expression::Logical(
                 Box::new(Expression::Comparison(
                     Terminal::Identifier("foo"),
                     EqualityOp::Equal,
                     Terminal::Literal(Literal::Int(7)),
+                )),
+                LogicalOp::And,
+                Box::new(Expression::Comparison(
+                    Terminal::Identifier("bar"),
+                    EqualityOp::GreaterThan,
+                    Terminal::Literal(Literal::Int(2)),
+                )),
+            )),
+        );
+        check(
+            "foo = true AND bar > 2",
+            Some(Expression::Logical(
+                Box::new(Expression::Comparison(
+                    Terminal::Identifier("foo"),
+                    EqualityOp::Equal,
+                    Terminal::Literal(Literal::Bool(true)),
                 )),
                 LogicalOp::And,
                 Box::new(Expression::Comparison(
@@ -331,6 +359,23 @@ mod test {
                         Terminal::Identifier("baz"),
                     )),
                 )),
+            )),
+        );
+    }
+
+    #[test]
+    fn test_where_clause_required() {
+        fn check(input: &str, out: Option<Expression>) {
+            parse_check(where_clause_required, input, out)
+        }
+
+        check("WHERE AND foo = false", None);
+        check(
+            "WHERE foo = false",
+            Some(Expression::Comparison(
+                Terminal::Identifier("foo"),
+                EqualityOp::Equal,
+                Terminal::Literal(Literal::Bool(false)),
             )),
         );
     }

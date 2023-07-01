@@ -34,38 +34,51 @@ fn query_result(db: DatabaseResult) -> QueryResult {
     }
 }
 
+fn check_query<B: TablePageStoreBuilder>(db: &mut Database<B>, q: &str, exp: Vec<Vec<Column>>) {
+    let result = db.exec(q).unwrap();
+    assert_eq!(exp, query_result(result).values);
+}
+
+fn check_exec<B: TablePageStoreBuilder>(db: &mut Database<B>, q: &str, exp_count: usize) {
+    let result = db.exec(q).unwrap();
+    assert_eq!(exp_count, exec_result(result).rows_affected);
+}
+
 fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>) {
-    let result = db
-        .exec(
-            r"CREATE TABLE testing {
+    check_exec(
+        &mut db,
+        r"CREATE TABLE testing {
     foo INT
     bar BOOL
     baz VARCHAR(16)
 }",
-        )
-        .unwrap();
-    assert_eq!(0, exec_result(result).rows_affected);
+        0,
+    );
 
     // insert in order
-    let result = db
-        .exec("INSERT INTO testing (foo, bar, baz) VALUES (1, false, \"hello\")")
-        .unwrap();
-    assert_eq!(1, exec_result(result).rows_affected);
+    check_exec(
+        &mut db,
+        "INSERT INTO testing (foo, bar, baz) VALUES (1, false, \"hello\")",
+        1,
+    );
 
     // insert columns out of order
-    let result = db
-        .exec("INSERT INTO testing (baz, foo, bar) VALUES (\"world\", 2, true)")
-        .unwrap();
-    assert_eq!(1, exec_result(result).rows_affected);
+    check_exec(
+        &mut db,
+        "INSERT INTO testing (baz, foo, bar) VALUES (\"world\", 2, true)",
+        1,
+    );
 
     // insert multiple
-    let result = db
-        .exec("INSERT INTO testing (foo, bar, baz) VALUES (3, false, \"whats\"), (4, true, \"up\")")
-        .unwrap();
-    assert_eq!(2, exec_result(result).rows_affected);
+    check_exec(
+        &mut db,
+        "INSERT INTO testing (foo, bar, baz) VALUES (3, false, \"whats\"), (4, true, \"up\")",
+        2,
+    );
 
-    let result = db.exec("SELECT * FROM testing").unwrap();
-    assert_eq!(
+    check_query(
+        &mut db,
+        "SELECT * FROM testing",
         vec![
             vec![
                 Column::Int(1),
@@ -86,48 +99,63 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>) {
                 Column::Int(4),
                 Column::Bool(true),
                 Column::VarChar("up".to_string()),
-            ]
+            ],
         ],
-        query_result(result).values
     );
 
-    let result = db.exec("SELECT foo, bar FROM testing").unwrap();
-    assert_eq!(
+    check_query(
+        &mut db,
+        "SELECT foo, bar FROM testing",
         vec![
-            vec![Column::Int(1), Column::Bool(false),],
-            vec![Column::Int(2), Column::Bool(true),],
-            vec![Column::Int(3), Column::Bool(false),],
-            vec![Column::Int(4), Column::Bool(true),]
+            vec![Column::Int(1), Column::Bool(false)],
+            vec![Column::Int(2), Column::Bool(true)],
+            vec![Column::Int(3), Column::Bool(false)],
+            vec![Column::Int(4), Column::Bool(true)],
         ],
-        query_result(result).values
     );
 
-    let result = db.exec("SELECT * FROM testing WHERE foo = 1").unwrap();
-    assert_eq!(
+    check_query(
+        &mut db,
+        "SELECT * FROM testing WHERE foo = 1",
         vec![vec![
             Column::Int(1),
             Column::Bool(false),
             Column::VarChar("hello".to_string()),
         ]],
-        query_result(result).values
     );
 
-    let result = db.exec("SELECT * FROM testing WHERE foo = 1").unwrap();
-    assert_eq!(
+    check_query(
+        &mut db,
+        "SELECT * FROM testing WHERE foo = 1",
         vec![vec![
             Column::Int(1),
             Column::Bool(false),
             Column::VarChar("hello".to_string()),
         ]],
-        query_result(result).values
     );
 
-    let result = db.exec("SELECT baz FROM testing WHERE foo < 3").unwrap();
-    assert_eq!(
+    check_query(
+        &mut db,
+        "SELECT baz FROM testing WHERE foo < 3",
         vec![
-            vec![Column::VarChar("hello".to_string()),],
-            vec![Column::VarChar("world".to_string()),]
+            vec![Column::VarChar("hello".to_string())],
+            vec![Column::VarChar("world".to_string())],
         ],
-        query_result(result).values
+    );
+
+    check_query(
+        &mut db,
+        "SELECT foo FROM testing WHERE bar = false",
+        vec![vec![Column::Int(1)], vec![Column::Int(3)]],
+    );
+
+    check_query(
+        &mut db,
+        "SELECT * FROM testing WHERE foo = 1 AND bar = false AND baz = \"hello\"",
+        vec![vec![
+            Column::Int(1),
+            Column::Bool(false),
+            Column::VarChar("hello".to_string()),
+        ]],
     );
 }

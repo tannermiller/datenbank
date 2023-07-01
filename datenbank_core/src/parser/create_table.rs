@@ -1,6 +1,7 @@
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::{char, multispace0, newline, space0, space1, u16 as char_u16};
+use nom::combinator::all_consuming;
 use nom::multi::many1;
 use nom::sequence::{delimited, pair, separated_pair, tuple};
 use nom::IResult;
@@ -8,9 +9,11 @@ use nom::IResult;
 use super::{identifier, ColumnSchema, ColumnType, Input};
 
 pub fn create_table(input: &str) -> IResult<&str, Input> {
-    let (input, table_name) = create_table_header(input)?;
-    let (input, schema) = many1(column_schema)(input)?;
-    let (input, _) = pair(char('}'), multispace0)(input)?;
+    let (input, (table_name, schema, _)) = all_consuming(tuple((
+        create_table_header,
+        many1(column_schema),
+        pair(char('}'), multispace0),
+    )))(input)?;
     Ok((input, Input::Create { table_name, schema }))
 }
 
