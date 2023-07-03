@@ -28,7 +28,7 @@ pub fn encode<S: TablePageStore>(name: &str, schema: &Schema, tree: &BTree<S>) -
     let mut header_bytes = Vec::with_capacity(
         13 + name.as_bytes().len()
             + 4 * schema.columns().len()
-            + 4 * schema.primary_key().map_or_else(|| 0, |k| k.len()),
+            + 4 * schema.primary_key_columns().map_or_else(|| 0, |k| k.len()),
     );
 
     header_bytes

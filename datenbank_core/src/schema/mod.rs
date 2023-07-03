@@ -23,12 +23,38 @@ pub enum Error {
     InvalidPrimaryKeyColumn(String),
 }
 
+// The primary key contains the column names in order as well as the indices relative to the table
+// columns those fields correspond.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrimaryKey {
+    column_names: Vec<Rc<String>>,
+    column_indices: Vec<usize>,
+}
+
+impl PrimaryKey {
+    fn new(table_columns: &[(Rc<String>, ColumnType)], column_names: Vec<Rc<String>>) -> Self {
+        let mut column_indices = Vec::with_capacity(column_names.len());
+        for pk_col_name in column_names.iter() {
+            for (i, (col_name, _)) in table_columns.iter().enumerate() {
+                if *pk_col_name == *col_name {
+                    column_indices.push(i);
+                    break;
+                }
+            }
+        }
+        PrimaryKey {
+            column_names,
+            column_indices,
+        }
+    }
+}
+
 // The schema describes the columns that make each row in the table.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Schema {
     // each column has a name a data type
     columns: Vec<(Rc<String>, ColumnType)>,
-    primary_key: Option<Vec<Rc<String>>>,
+    primary_key: Option<PrimaryKey>,
 }
 
 impl Schema {
@@ -58,7 +84,7 @@ impl Schema {
                         None => return Err(Error::InvalidPrimaryKeyColumn(pk.to_string())),
                     }
                 }
-                Some(primary_cols)
+                Some(PrimaryKey::new(&columns, primary_cols))
             }
             None => None,
         };
@@ -264,8 +290,8 @@ impl Schema {
         &self.columns
     }
 
-    pub fn primary_key(&self) -> Option<&Vec<Rc<String>>> {
-        self.primary_key.as_ref()
+    pub fn primary_key_columns(&self) -> Option<&Vec<Rc<String>>> {
+        self.primary_key.as_ref().map(|pk| &pk.column_names)
     }
 }
 

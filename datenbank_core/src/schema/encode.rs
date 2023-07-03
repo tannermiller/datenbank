@@ -7,12 +7,15 @@ use nom::multi::{length_count, length_value};
 use nom::number::complete::{be_u16, be_u8};
 use nom::{Err as NomErr, IResult};
 
-use super::{ColumnType, Schema};
+use super::{ColumnType, PrimaryKey, Schema};
 use crate::parser::identifier_bytes;
 
 pub fn encode(schema: &Schema) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(
-        2 + schema.columns().len() + schema.primary_key().map_or_else(|| 0, |k| 2 + k.len()),
+        2 + schema.columns().len()
+            + schema
+                .primary_key_columns()
+                .map_or_else(|| 0, |k| 2 + k.len()),
     );
 
     bytes
@@ -22,7 +25,7 @@ pub fn encode(schema: &Schema) -> Vec<u8> {
         encode_column_type(name, column, &mut bytes);
     }
 
-    if let Some(primary_key) = &schema.primary_key {
+    if let Some(primary_key) = schema.primary_key_columns() {
         bytes
             .write_all(&(primary_key.len() as u16).to_be_bytes())
             .expect("can't fail writing to vec");
@@ -83,7 +86,7 @@ pub fn decode(input: &[u8]) -> IResult<&[u8], Schema> {
             }
         }
 
-        primary_key = Some(pk_fields);
+        primary_key = Some(PrimaryKey::new(&columns, pk_fields));
     }
 
     Ok((

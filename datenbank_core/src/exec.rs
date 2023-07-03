@@ -225,7 +225,8 @@ fn is_key_lookup(schema: &Schema, expr: &Comparison) -> Option<Vec<u8>> {
     // TODO:If we have a complete key and still more comparisons, do we do a lookup and apply a
     // predicate?
 
-    let key_fields: Vec<&(Rc<String>, ColumnType)> = if let Some(pk) = schema.primary_key() {
+    let key_fields: Vec<&(Rc<String>, ColumnType)> = if let Some(pk) = schema.primary_key_columns()
+    {
         pk.iter()
             .map(|k| {
                 for col @ (col_name, _) in schema.columns() {
