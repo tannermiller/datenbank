@@ -2,6 +2,7 @@ use super::Error;
 use crate::cache::{Error as CacheError, Page};
 use crate::key;
 use crate::row::Row;
+use crate::schema::Schema;
 
 pub(crate) mod encode;
 
@@ -136,13 +137,18 @@ pub(crate) struct Leaf {
 impl Leaf {
     // insert a row into this leaf node, if this node has to split, the new right sibling's body is
     // returned in the option
-    pub(crate) fn insert_row(&mut self, order: usize, row: Row) -> Result<Option<NodeBody>, Error> {
+    pub(crate) fn insert_row(
+        &mut self,
+        schema: &Schema,
+        order: usize,
+        row: Row,
+    ) -> Result<Option<NodeBody>, Error> {
         if self.rows.len() < order {
             match self
                 .rows
-                .binary_search_by_key(&key::build(&row.body), |r| key::build(&r.body))
+                .binary_search_by_key(&row.key(schema), |r| r.key(schema))
             {
-                Ok(_) => Err(Error::DuplicateEntry(key::build(&row.body))),
+                Ok(_) => Err(Error::DuplicateEntry(row.key(schema))),
                 Err(i) => {
                     // don't need to expand, just insert the row and be done
                     self.rows.insert(i, row);
@@ -154,13 +160,12 @@ impl Leaf {
             let midpoint = ((self.rows.len() + 1) as f64 / 2.0).ceil() as usize;
             let mut right_sib_rows = self.rows.split_off(midpoint);
 
-            let rows = if !right_sib_rows.is_empty()
-                && key::build(&row.body) < key::build(&right_sib_rows[0].body)
-            {
-                &mut self.rows
-            } else {
-                &mut right_sib_rows
-            };
+            let rows =
+                if !right_sib_rows.is_empty() && row.key(schema) < right_sib_rows[0].key(schema) {
+                    &mut self.rows
+                } else {
+                    &mut right_sib_rows
+                };
 
             // gotta search again because we're not sure what the index is in its new sibling
             let row_key = key::build(&row.body);

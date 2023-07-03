@@ -1,7 +1,6 @@
 use std::rc::Rc;
 
 use crate::cache::{Cache, Error as CacheError};
-use crate::key;
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
 use crate::row::{Error as RowError, Predicate};
 use crate::schema::{Column, Schema};
@@ -150,20 +149,18 @@ impl<S: TablePageStore> BTree<S> {
     }
 
     pub fn lookup(&mut self, key: &Vec<u8>) -> Result<Option<Vec<Column>>, Error> {
-        let (leaf_id, _) = self.find_containing_leaf(dbg!(key))?;
+        let (leaf_id, _) = self.find_containing_leaf(key)?;
 
-        let node = self.node_cache.get(dbg!(leaf_id))?;
+        let node = self.node_cache.get(leaf_id)?;
 
         let rows = match &node.body {
             NodeBody::Internal(_) => unreachable!(),
             NodeBody::Leaf(Leaf { rows, .. }) => rows,
         };
 
-        dbg!(rows);
-        let i = match rows.binary_search_by_key(key, |r| key::build(&r.body)) {
+        let i = match rows.binary_search_by_key(key, |r| r.key(&self.schema)) {
             Ok(i) => i,
-            Err(j) => {
-                dbg!(j);
+            Err(_) => {
                 return Ok(None);
             }
         };
@@ -280,8 +277,6 @@ mod test {
         let root_id = node_cache.allocate().unwrap();
         let left_id = node_cache.allocate().unwrap();
         let right_id = node_cache.allocate().unwrap();
-        dbg!(left_id);
-        dbg!(right_id);
         node_cache
             .put(
                 root_id,

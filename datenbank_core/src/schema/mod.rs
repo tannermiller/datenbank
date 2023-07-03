@@ -293,6 +293,10 @@ impl Schema {
     pub fn primary_key_columns(&self) -> Option<&Vec<Rc<String>>> {
         self.primary_key.as_ref().map(|pk| &pk.column_names)
     }
+
+    pub fn primary_key_indices(&self) -> Option<&Vec<usize>> {
+        self.primary_key.as_ref().map(|pk| &pk.column_indices)
+    }
 }
 
 // TODO: Rename this to Value as its independent of the column

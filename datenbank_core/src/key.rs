@@ -27,6 +27,12 @@ pub fn build<KP: KeyPart>(parts: &[KP]) -> Vec<u8> {
 
 impl KeyPart for RowCol {
     fn to_key_part(&self, key: &mut Vec<u8>) {
+        (&self).to_key_part(key)
+    }
+}
+
+impl KeyPart for &RowCol {
+    fn to_key_part(&self, key: &mut Vec<u8>) {
         match self {
             RowCol::Int(i) => key.extend(i.to_be_bytes()),
             RowCol::Bool(b) => key.push(if *b { 1 } else { 0 }),

@@ -2,6 +2,7 @@ use std::io::Write;
 use std::rc::Rc;
 
 use crate::cache::{Cache, Error as CacheError};
+use crate::key;
 use crate::pagestore::TablePageStore;
 use crate::schema::Error as SchemaError;
 use crate::schema::{Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
@@ -95,6 +96,17 @@ impl Row {
         }
 
         Ok(row_values)
+    }
+
+    pub(crate) fn key(&self, schema: &Schema) -> Vec<u8> {
+        match schema.primary_key_indices() {
+            Some(pk_indices) => {
+                let key_parts: Vec<&RowCol> =
+                    pk_indices.iter().map(|pki| &self.body[*pki]).collect();
+                key::build(&key_parts)
+            }
+            None => key::build(&self.body),
+        }
     }
 }
 
