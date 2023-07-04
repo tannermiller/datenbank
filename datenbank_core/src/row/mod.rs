@@ -248,6 +248,7 @@ impl<S: TablePageStore> Predicate<S> for AllRows {
 mod test {
     use super::*;
     use crate::pagestore::{MemoryBuilder, TablePageStoreBuilder};
+    use crate::schema::ColumnType;
 
     #[test]
     fn test_process_columns() {
@@ -372,5 +373,54 @@ mod test {
             data_cache.get(3).unwrap()
         );
         assert_eq!(&vec![0u8, 0, 0, 0, 1, 57], data_cache.get(4).unwrap());
+    }
+
+    #[test]
+    fn test_key() {
+        let row = Row {
+            body: vec![
+                RowCol::Int(7),
+                RowCol::Bool(true),
+                RowCol::VarChar(RowVarChar {
+                    inline: "Hello, World!".as_bytes().to_vec(),
+                    next_page: None,
+                }),
+            ],
+        };
+
+        let schema_no_pk = Schema::new(
+            vec![
+                ("foo".into(), ColumnType::Int),
+                ("bar".into(), ColumnType::Bool),
+                ("baz".into(), ColumnType::VarChar(16)),
+            ],
+            None,
+        )
+        .unwrap();
+
+        let schema_with_pk = Schema::new(
+            vec![
+                ("foo".into(), ColumnType::Int),
+                ("bar".into(), ColumnType::Bool),
+                ("baz".into(), ColumnType::VarChar(16)),
+            ],
+            Some(vec!["baz", "foo"]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            vec![
+                0, 0, 0, 7, b'_', 1, b'_', b'H', b'e', b'l', b'l', b'o', b',', b' ', b'W', b'o',
+                b'r', b'l', b'd', b'!'
+            ],
+            row.key(&schema_no_pk)
+        );
+        assert_eq!(
+            vec![
+                b'H', b'e', b'l', b'l', b'o', b',', b' ', b'W', b'o', b'r', b'l', b'd', b'!', b'_',
+                0, 0, 0, 7,
+            ],
+            row.key(&schema_with_pk)
+        );
     }
 }
