@@ -50,6 +50,7 @@ pub fn execute<M: TablePageStoreManager>(
             table_name,
             columns,
             primary_key,
+            indices: _, // TODO
         } => create_table(store_manager, table_name, columns, primary_key),
         Input::InsertInto {
             table_name,

@@ -9,13 +9,14 @@ use nom::multi::{many0, many1};
 use nom::sequence::{delimited, pair, separated_pair, tuple};
 use nom::IResult;
 
-use super::{identifier, ColumnSchema, ColumnType, Input};
+use super::{identifier, ColumnSchema, ColumnType, Index, Input};
 
 pub fn create_table(input: &str) -> IResult<&str, Input> {
-    let (input, (table_name, columns, primary_key, _)) = all_consuming(tuple((
+    let (input, (table_name, columns, primary_key, indices, _)) = all_consuming(tuple((
         create_table_header,
         many1(column_schema),
         opt(primary_key),
+        many0(index),
         pair(char('}'), multispace0),
     )))(input)?;
     Ok((
@@ -24,6 +25,7 @@ pub fn create_table(input: &str) -> IResult<&str, Input> {
             table_name,
             columns,
             primary_key,
+            indices,
         },
     ))
 }
@@ -80,14 +82,32 @@ fn column_schema(input: &str) -> IResult<&str, ColumnSchema> {
 }
 
 fn primary_key(input: &str) -> IResult<&str, Vec<&str>> {
+    let (input, (_, _, _, cols)) = tuple((
+        space0,
+        tag_no_case("primary key"),
+        multispace1,
+        index_column_list,
+    ))(input)?;
+
+    Ok((input, cols))
+}
+
+fn index(input: &str) -> IResult<&str, Index> {
+    let (input, (_, _, _, name, _, columns)) = tuple((
+        space0,
+        tag_no_case("index"),
+        multispace1,
+        identifier,
+        multispace1,
+        index_column_list,
+    ))(input)?;
+
+    Ok((input, Index { name, columns }))
+}
+
+fn index_column_list(input: &str) -> IResult<&str, Vec<&str>> {
     let (input, (first, other_cols)) = delimited(
-        tuple((
-            space0,
-            tag_no_case("primary key"),
-            multispace1,
-            tag("("),
-            multispace0,
-        )),
+        tuple((tag("("), multispace0)),
         pair(
             identifier,
             many0(tuple((tag(","), multispace1, identifier))),
@@ -189,6 +209,37 @@ mod test {
     }
 
     #[test]
+    fn test_index() {
+        fn check(input: &str, expected: Option<Index>) {
+            parse_check(index, input, expected)
+        }
+
+        check("nope", None);
+        check("", None);
+        check(
+            "INDEX idx_foo (foo)\n",
+            Some(Index {
+                name: "idx_foo",
+                columns: vec!["foo"],
+            }),
+        );
+        check(
+            "INDEX IdxFooBar (foo, bar)\n",
+            Some(Index {
+                name: "IdxFooBar",
+                columns: vec!["foo", "bar"],
+            }),
+        );
+        check(
+            "INDEX whats_an_INDEX (\nfoo,\nbar\n)\n",
+            Some(Index {
+                name: "whats_an_INDEX",
+                columns: vec!["foo", "bar"],
+            }),
+        );
+    }
+
+    #[test]
     fn test_create_table() {
         fn check(input: &str, expected: Option<Input>) {
             parse_check(create_table, input, expected)
@@ -212,6 +263,7 @@ VC82 VarChar(82)
                     ColumnSchema::new("lonG_Blob_big", ColumnType::LongBlob(100000)),
                 ],
                 primary_key: None,
+                indices: vec![],
             }),
         );
 
@@ -231,6 +283,7 @@ VC82 VarChar(82)
                     ColumnSchema::new("lonG_Blob_big", ColumnType::LongBlob(100000)),
                 ],
                 primary_key: None,
+                indices: vec![],
             }),
         );
 
@@ -251,6 +304,7 @@ VC82 VarChar(82)
                     ColumnSchema::new("lonG_Blob_big", ColumnType::LongBlob(100000)),
                 ],
                 primary_key: Some(vec!["SomeInt"]),
+                indices: vec![],
             }),
         );
 
@@ -276,6 +330,63 @@ VC82 VarChar(82)
                     ColumnSchema::new("lonG_Blob_big", ColumnType::LongBlob(100000)),
                 ],
                 primary_key: Some(vec!["SomeInt", "some_bool", "VC82", "lonG_Blob_big"]),
+                indices: vec![],
+            }),
+        );
+
+        check(
+            r"CREATE TABLE Foo {
+    SomeInt INT
+    some_bool Bool
+    VC82 VarChar(82)
+    INDEX idx_SomeInt_some_bool_VC82 (
+        SomeInt,
+        some_bool,
+        VC82
+    )
+}",
+            Some(Input::Create {
+                table_name: "Foo",
+                columns: vec![
+                    ColumnSchema::new("SomeInt", ColumnType::Int),
+                    ColumnSchema::new("some_bool", ColumnType::Bool),
+                    ColumnSchema::new("VC82", ColumnType::VarChar(82)),
+                ],
+                primary_key: None,
+                indices: vec![Index {
+                    name: "idx_SomeInt_some_bool_VC82",
+                    columns: vec!["SomeInt", "some_bool", "VC82"],
+                }],
+            }),
+        );
+
+        check(
+            r"CREATE TABLE Foo {
+    SomeInt INT
+    some_bool Bool
+    VC82 VarChar(82)
+    PRIMARY KEY (SomeInt, some_bool, VC82)
+    INDEX loveIndices (VC82, SomeInt)
+    INDEX also_love_INDEX42 (some_bool, SomeInt)
+}",
+            Some(Input::Create {
+                table_name: "Foo",
+                columns: vec![
+                    ColumnSchema::new("SomeInt", ColumnType::Int),
+                    ColumnSchema::new("some_bool", ColumnType::Bool),
+                    ColumnSchema::new("VC82", ColumnType::VarChar(82)),
+                ],
+                primary_key: Some(vec!["SomeInt", "some_bool", "VC82"]),
+                indices: vec![
+                    Index {
+                        name: "loveIndices",
+                        columns: vec!["VC82", "SomeInt"],
+                    },
+                    Index {
+                        name: "also_love_INDEX42",
+                        columns: vec!["some_bool", "SomeInt"],
+                    },
+                ],
             }),
         );
     }

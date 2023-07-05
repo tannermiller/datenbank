@@ -29,6 +29,7 @@ pub enum Input<'a> {
         table_name: &'a str,
         columns: Vec<ColumnSchema<'a>>,
         primary_key: Option<Vec<&'a str>>,
+        indices: Vec<Index<'a>>,
     },
     InsertInto {
         table_name: &'a str,
@@ -98,6 +99,12 @@ impl<'a> ColumnSchema<'a> {
 pub enum SelectColumns<'a> {
     Star,
     Explicit(Vec<&'a str>),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Index<'a> {
+    pub name: &'a str,
+    pub columns: Vec<&'a str>,
 }
 
 pub fn parse(input_str: &str) -> Result<Input, Error> {
