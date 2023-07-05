@@ -1,7 +1,10 @@
 use std::env;
 use std::fs;
 
-use datenbank_core::api::{Column, DatabaseResult, ExecResult, QueryResult, TablePageStoreBuilder};
+use datenbank_core::api::{
+    BTreeError, Column, DatabaseResult, Error, ExecError, ExecResult, ParseError, QueryResult,
+    TableError, TablePageStoreBuilder,
+};
 use datenbank_core::Database;
 
 #[test]
@@ -32,7 +35,7 @@ fn test_basic_file_with_pk_integration() {
     let _ = fs::remove_dir_all(&temp_dir);
     let _ = fs::create_dir(&temp_dir);
     let db = Database::file(&temp_dir);
-    run_basic_test(db, false);
+    run_basic_test(db, true);
     let _ = fs::remove_dir_all(&temp_dir);
 }
 
@@ -55,12 +58,16 @@ fn check_query<B: TablePageStoreBuilder>(db: &mut Database<B>, q: &str, exp: Vec
     assert_eq!(exp, query_result(result).values);
 }
 
+fn check_exec_err<B: TablePageStoreBuilder>(db: &mut Database<B>, q: &str, exp: Error) {
+    let result = db.exec(q);
+    assert_eq!(Err(exp), result);
+}
+
 fn check_exec<B: TablePageStoreBuilder>(db: &mut Database<B>, q: &str, exp_count: usize) {
     let result = db.exec(q).unwrap();
     assert_eq!(exp_count, exec_result(result).rows_affected);
 }
 
-// TODO: Should also test some error cases, such as inserting duplicate row
 fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_key: bool) {
     let create_table = format!(
         r"CREATE TABLE testing {{
@@ -96,6 +103,19 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_ke
         &mut db,
         "INSERT INTO testing (foo, bar, baz) VALUES (3, false, \"whats\"), (4, true, \"up\")",
         2,
+    );
+
+    // insert duplicate row, should error
+    check_exec_err(
+        &mut db,
+        "INSERT INTO testing (foo, bar, baz) VALUES (1, false, \"hello\")",
+        Error::Exec(ExecError::Table(TableError::BTree(
+            BTreeError::DuplicateEntry(if with_primary_key {
+                vec![b'h', b'e', b'l', b'l', b'o', b'_', 0, 0, 0, 1]
+            } else {
+                vec![0, 0, 0, 1, b'_', 0, b'_', b'h', b'e', b'l', b'l', b'o']
+            }),
+        ))),
     );
 
     // The order of results will be different based on the primary key in a table scan because the
@@ -236,4 +256,13 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_ke
             Column::VarChar("hello".to_string()),
         ]],
     );
+
+    // garbage in, error out
+    check_exec_err(
+        &mut db,
+        "garbage",
+        Error::Parse(ParseError {
+            msg: "error Tag at: garbage".into(),
+        }),
+    )
 }

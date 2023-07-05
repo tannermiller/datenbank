@@ -19,7 +19,7 @@ mod select_from;
 #[error("error parsing SQL input: {msg}")]
 pub struct Error {
     // TODO: its not ideal to drop the parser error info here, but its being stupid
-    msg: String,
+    pub msg: String,
 }
 
 // Input is the parsed abstract syntax tree for valid SQL input.

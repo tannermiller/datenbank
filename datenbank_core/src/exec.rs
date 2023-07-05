@@ -25,14 +25,17 @@ pub enum Error {
     InvalidWhereClause(String),
 }
 
+#[derive(Debug, PartialEq)]
 pub struct ExecResult {
     pub rows_affected: usize,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct QueryResult {
     pub values: Vec<Vec<Column>>,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum DatabaseResult {
     Exec(ExecResult),
     Query(QueryResult),

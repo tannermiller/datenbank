@@ -1,11 +1,16 @@
 use std::path::PathBuf;
 
-use crate::exec::{execute, Error as ExecError};
-use crate::parser::{parse, Error as ParseError};
+use crate::exec::execute;
+use crate::parser::parse;
 
-pub use crate::exec::{DatabaseResult, ExecResult, QueryResult};
-pub use crate::pagestore::{FileBuilder, MemoryBuilder, TablePageStoreBuilder};
-pub use crate::schema::Column;
+pub use crate::cache::Error as CacheError;
+pub use crate::exec::{DatabaseResult, Error as ExecError, ExecResult, QueryResult};
+pub use crate::pagestore::{Error as PageError, FileBuilder, MemoryBuilder, TablePageStoreBuilder};
+pub use crate::parser::Error as ParseError;
+pub use crate::row::Error as RowError;
+pub use crate::schema::{Column, Error as SchemaError};
+pub use crate::table::btree::Error as BTreeError;
+pub use crate::table::Error as TableError;
 
 // 16k page sizes for now
 // TODO: How should this be made configurable?
