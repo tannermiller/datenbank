@@ -166,7 +166,7 @@ mod test {
 
     #[test]
     fn test_insert_across_split() {
-        let schema = Schema::new(vec![("foo".into(), ColumnType::Int)], None).unwrap();
+        let schema = Schema::new(vec![("foo".into(), ColumnType::Int)], None, vec![]).unwrap();
         let table_name = "test";
         let mut store_builder = MemoryManager::new(64 * 1024).builder(&table_name).unwrap();
         let order = 2;

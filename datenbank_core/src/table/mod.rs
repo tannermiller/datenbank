@@ -135,6 +135,7 @@ mod test {
                 ("everything_nice".into(), ColumnType::Bool),
             ],
             None,
+            vec![],
         )
         .unwrap();
         let mut store_builder = MemoryManager::new(1024 * 64).builder(&name).unwrap();
@@ -154,9 +155,10 @@ mod test {
             assert_eq!(
                 vec![
                     18, b'b', b'a', b'b', b'i', b'e', b's', b'_', b'f', b'i', b'r', b's', b't',
-                    b'_', b't', b'a', b'b', b'l', b'e', 0, 38, 0, 3, 1, 0, 5, 115, 117, 103, 97,
+                    b'_', b't', b'a', b'b', b'l', b'e', 0, 42, 0, 3, 1, 0, 5, 115, 117, 103, 97,
                     114, 0, 0, 5, 115, 112, 105, 99, 101, 0, 10, 2, 0, 15, 101, 118, 101, 114, 121,
-                    116, 104, 105, 110, 103, 95, 110, 105, 99, 101, 0, 8, 0, 0, 7, 255, 0, 0, 0, 0
+                    116, 104, 105, 110, 103, 95, 110, 105, 99, 101, 0, 0, 0, 0, 0, 8, 0, 0, 7, 255,
+                    0, 0, 0, 0
                 ],
                 table_header_page
             );
@@ -184,6 +186,7 @@ mod test {
                 ("infinity".into(), ColumnType::Bool),
             ],
             None,
+            vec![],
         )
         .unwrap();
         let mut store_builder = MemoryManager::new(1024 * 64).builder(&name).unwrap();
@@ -232,6 +235,7 @@ mod test {
                 ("three".into(), ColumnType::Bool),
             ],
             None,
+            vec![],
         )
         .unwrap();
         let mut store_builder = MemoryManager::new(1024 * 16).builder(&name).unwrap();

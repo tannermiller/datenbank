@@ -451,6 +451,7 @@ mod test {
                 ("qux".into(), ColumnType::LongBlob(16)),
             ],
             None,
+            vec![],
         )
         .unwrap();
 
@@ -462,6 +463,7 @@ mod test {
                 ("qux".into(), ColumnType::LongBlob(16)),
             ],
             Some(vec!["baz", "foo"]),
+            vec![],
         )
         .unwrap();
 

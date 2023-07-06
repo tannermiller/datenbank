@@ -232,7 +232,7 @@ mod test {
 
     #[test]
     fn test_find_containing_leaf_and_lookup_root_is_leaf() {
-        let schema = Schema::new(vec![("foo".into(), ColumnType::Int)], None).unwrap();
+        let schema = Schema::new(vec![("foo".into(), ColumnType::Int)], None, vec![]).unwrap();
         let mut store_builder = MemoryManager::new(64 * 1024).builder("test").unwrap();
         let data_cache = Cache::new(store_builder.build().unwrap());
         let mut node_cache = Cache::new(store_builder.build().unwrap());
@@ -269,7 +269,7 @@ mod test {
 
     #[test]
     fn test_find_containing_leaf_and_lookup_root_is_internal() {
-        let schema = Schema::new(vec![("foo".into(), ColumnType::Int)], None).unwrap();
+        let schema = Schema::new(vec![("foo".into(), ColumnType::Int)], None, vec![]).unwrap();
         let mut store_builder = MemoryManager::new(64 * 1024).builder("test").unwrap();
         let data_cache = Cache::new(store_builder.build().unwrap());
         let mut node_cache = Cache::new(store_builder.build().unwrap());

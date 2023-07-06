@@ -4,8 +4,8 @@ use crate::cache::Cache;
 use crate::key;
 use crate::pagestore::{Error as PageStoreError, TablePageStore, TablePageStoreManager};
 use crate::parser::{
-    self, ColumnSchema, ColumnType as ParserColumnType, EqualityOp, Expression, Input, Literal,
-    LogicalOp, SelectColumns, Terminal as ParserTerm,
+    self, ColumnSchema, ColumnType as ParserColumnType, EqualityOp, Expression, Index, Input,
+    Literal, LogicalOp, SelectColumns, Terminal as ParserTerm,
 };
 use crate::row::{AllRows, Error as RowError, Predicate, Row};
 use crate::schema::{Column, ColumnType, Error as SchemaError, Schema};
@@ -50,8 +50,8 @@ pub fn execute<M: TablePageStoreManager>(
             table_name,
             columns,
             primary_key,
-            indices: _, // TODO
-        } => create_table(store_manager, table_name, columns, primary_key),
+            indices,
+        } => create_table(store_manager, table_name, columns, primary_key, indices),
         Input::InsertInto {
             table_name,
             columns,
@@ -70,8 +70,9 @@ fn create_table<M: TablePageStoreManager>(
     table_name: &str,
     columns: Vec<ColumnSchema>,
     primary_key: Option<Vec<&str>>,
+    indices: Vec<Index>,
 ) -> Result<DatabaseResult, Error> {
-    let schema = parser_schema_to_table_schema(columns, primary_key)?;
+    let schema = parser_schema_to_table_schema(columns, primary_key, indices)?;
     Table::create(
         table_name.to_string(),
         schema,
@@ -83,6 +84,7 @@ fn create_table<M: TablePageStoreManager>(
 fn parser_schema_to_table_schema(
     parser_schema: Vec<ColumnSchema>,
     primary_key: Option<Vec<&str>>,
+    indices: Vec<Index>,
 ) -> Result<Schema, Error> {
     let columns = parser_schema
         .into_iter()
@@ -97,7 +99,12 @@ fn parser_schema_to_table_schema(
         })
         .collect();
 
-    Schema::new(columns, primary_key).map_err(Into::into)
+    let indices = indices
+        .into_iter()
+        .map(|idx| (idx.name, idx.columns))
+        .collect();
+
+    Schema::new(columns, primary_key, indices).map_err(Into::into)
 }
 
 fn insert_into<M: TablePageStoreManager>(
@@ -457,6 +464,7 @@ mod test {
                 ("baz".into(), ColumnType::Int),
             ],
             None,
+            vec![],
         )
         .unwrap();
         let mut store_builder = MemoryManager::new(64 * 1024).builder("test").unwrap();
@@ -658,7 +666,8 @@ mod test {
 
     #[test]
     fn test_is_key_lookup() {
-        let one_field_schema = Schema::new(vec![("foo".into(), ColumnType::Int)], None).unwrap();
+        let one_field_schema =
+            Schema::new(vec![("foo".into(), ColumnType::Int)], None, vec![]).unwrap();
         assert_eq!(
             None,
             is_key_lookup(
@@ -691,6 +700,7 @@ mod test {
                 ("qux".into(), ColumnType::VarChar(20)),
             ],
             None,
+            vec![],
         )
         .unwrap();
         assert_eq!(
@@ -803,6 +813,7 @@ mod test {
                 ("qux".into(), ColumnType::VarChar(20)),
             ],
             Some(vec!["foo".into(), "bar".into()]),
+            vec![],
         )
         .unwrap();
         assert_eq!(

@@ -21,6 +21,8 @@ pub enum Error {
     InvalidColumn(String),
     #[error("invalid primary key column {0}")]
     InvalidPrimaryKeyColumn(String),
+    #[error("invalid index column {0}")]
+    InvalidIndexColumn(String),
 }
 
 // The primary key contains the column names in order as well as the indices relative to the table
@@ -49,12 +51,19 @@ impl PrimaryKey {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Index {
+    name: String,
+    columns: Vec<Rc<String>>,
+}
+
 // The schema describes the columns that make each row in the table.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Schema {
     // each column has a name a data type
     columns: Vec<(Rc<String>, ColumnType)>,
     primary_key: Option<PrimaryKey>,
+    indices: Vec<Index>,
 }
 
 impl Schema {
@@ -62,6 +71,7 @@ impl Schema {
     pub fn new(
         column_definitions: Vec<(String, ColumnType)>,
         primary_key_def: Option<Vec<&str>>,
+        indices_def: Vec<(&str, Vec<&str>)>,
     ) -> Result<Self, Error> {
         let mut col_names = HashMap::new();
         let mut columns = Vec::with_capacity(column_definitions.len());
@@ -89,9 +99,27 @@ impl Schema {
             None => None,
         };
 
+        let indices = indices_def
+            .into_iter()
+            .map(|(name, cols)| {
+                let columns = cols
+                    .into_iter()
+                    .map(|col_name| match col_names.get(col_name) {
+                        Some(col) => Ok(col.clone()),
+                        None => Err(Error::InvalidIndexColumn(col_name.to_string())),
+                    })
+                    .collect::<Result<Vec<Rc<String>>, Error>>()?;
+                Ok(Index {
+                    name: name.into(),
+                    columns,
+                })
+            })
+            .collect::<Result<Vec<Index>, Error>>()?;
+
         Ok(Schema {
             columns,
             primary_key,
+            indices,
         })
     }
 
@@ -104,10 +132,18 @@ impl Schema {
     //     - for statically sized columns (e.g. Int, Bool), nothing else is encoded
     //     - for variable length columns (e.g. VarChar), the max len is encoded in however many
     //       bytes it requires
-    //   - if the primary key is set, then 2 bytes to store the number of primary key items
+    //   - 2 bytes for the number of primary key items
     //   - each primary key entry is encoded as:
     //     - 2 bytes for the length of the name of the column
     //     - the bytes for the name of the column
+    //  - 2 bytes for the number of indices
+    //  - each index is then encoded as:
+    //    - 2 bytes for the length of the index name
+    //    - the bytes for the name of the index
+    //    - 2 bytes for count of column names
+    //    - each column name is encoded as:
+    //      - 2 bytes for the length of the column name
+    //      - the bytes of the column name
     pub fn encode(&self) -> Vec<u8> {
         encode::encode(self)
     }
@@ -312,6 +348,10 @@ impl Schema {
     pub fn primary_key_indices(&self) -> Option<&Vec<usize>> {
         self.primary_key.as_ref().map(|pk| &pk.column_indices)
     }
+
+    pub fn indices(&self) -> &[Index] {
+        &self.indices
+    }
 }
 
 // TODO: Rename this to Value as its independent of the column
@@ -396,6 +436,7 @@ mod test {
                 ("foo".into(), ColumnType::Bool),
             ],
             None,
+            vec![],
         );
         assert_eq!(Err(Error::NonUniqueColumn("foo".into())), res);
     }
@@ -425,6 +466,7 @@ mod test {
                 ("baz".into(), ColumnType::LongBlob(10)),
             ],
             None,
+            vec![],
         )
         .unwrap();
 
@@ -502,6 +544,7 @@ mod test {
                     ("qux".into(), ColumnType::VarChar(10)),
                 ],
                 None,
+                vec![],
             )
             .unwrap(),
             28,
@@ -514,6 +557,7 @@ mod test {
                     ("qux".into(), ColumnType::VarChar(1024)),
                 ],
                 None,
+                vec![],
             )
             .unwrap(),
             530,
@@ -544,6 +588,7 @@ mod test {
                 ("qux".into(), ColumnType::VarChar(10)),
             ],
             None,
+            vec![],
         )
         .unwrap();
 
@@ -596,6 +641,7 @@ mod test {
                 ("qux".into(), ColumnType::VarChar(10)),
             ],
             None,
+            vec![],
         )
         .unwrap();
 
