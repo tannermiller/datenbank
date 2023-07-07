@@ -352,6 +352,51 @@ impl Schema {
     pub fn indices(&self) -> &[Index] {
         &self.indices
     }
+
+    // Each non-primary index in the table schema is stored in a separate btree which each has its
+    // own Schema which contains the index field columns plus an additional key column which
+    // contains the actual primary row key into the primary btree. This method generates those
+    // secondary btree schemas from the primary schema.
+    pub fn index_schemas(&self) -> Vec<(String, Schema)> {
+        let column_lookup: HashMap<&Rc<String>, &ColumnType> = self
+            .columns
+            .iter()
+            .map(|(col_name, col_type)| (col_name, col_type))
+            .collect();
+
+        self.indices
+            .iter()
+            .map(|idx| {
+                let primary_key = Some(PrimaryKey {
+                    column_names: idx.columns.clone(),
+                    column_indices: (0..idx.columns.len()).collect(),
+                });
+
+                let columns = idx
+                    .columns
+                    .iter()
+                    .map(|col_name| {
+                        // we've already validated that columns exist
+                        (
+                            col_name.clone(),
+                            (*column_lookup.get(col_name).unwrap()).clone(),
+                        )
+                    })
+                    // add one more column which is the key into the primary btree for this row
+                    .chain(vec![("key".to_string().into(), ColumnType::VarChar(1000))].into_iter())
+                    .collect();
+
+                (
+                    idx.name.clone(),
+                    Schema {
+                        columns,
+                        primary_key,
+                        indices: vec![],
+                    },
+                )
+            })
+            .collect()
+    }
 }
 
 // TODO: Rename this to Value as its independent of the column
@@ -664,6 +709,75 @@ mod test {
             &schema,
             SelectColumns::Explicit(vec!["bar", "foo"]),
             Some(vec![Rc::new("bar".to_string()), Rc::new("foo".to_string())]),
+        );
+    }
+
+    #[test]
+    fn test_index_schemas() {
+        let schema = Schema::new(
+            vec![
+                ("foo".into(), ColumnType::Int),
+                ("bar".into(), ColumnType::Bool),
+                ("qux".into(), ColumnType::VarChar(10)),
+            ],
+            None,
+            vec![
+                ("fb".into(), vec!["foo".into(), "bar".into()]),
+                ("qf".into(), vec!["qux".into(), "foo".into()]),
+                ("bq".into(), vec!["bar".into(), "qux".into()]),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(
+            vec![
+                (
+                    "fb".into(),
+                    Schema {
+                        columns: vec![
+                            ("foo".to_string().into(), ColumnType::Int),
+                            ("bar".to_string().into(), ColumnType::Bool),
+                            ("key".to_string().into(), ColumnType::VarChar(1000))
+                        ],
+                        primary_key: Some(PrimaryKey {
+                            column_names: vec!["foo".to_string().into(), "bar".to_string().into()],
+                            column_indices: vec![0, 1],
+                        }),
+                        indices: vec![],
+                    }
+                ),
+                (
+                    "qf".into(),
+                    Schema {
+                        columns: vec![
+                            ("qux".to_string().into(), ColumnType::VarChar(10)),
+                            ("foo".to_string().into(), ColumnType::Int),
+                            ("key".to_string().into(), ColumnType::VarChar(1000))
+                        ],
+                        primary_key: Some(PrimaryKey {
+                            column_names: vec!["qux".to_string().into(), "foo".to_string().into()],
+                            column_indices: vec![0, 1],
+                        }),
+                        indices: vec![],
+                    }
+                ),
+                (
+                    "bq".into(),
+                    Schema {
+                        columns: vec![
+                            ("bar".to_string().into(), ColumnType::Bool),
+                            ("qux".to_string().into(), ColumnType::VarChar(10)),
+                            ("key".to_string().into(), ColumnType::VarChar(1000))
+                        ],
+                        primary_key: Some(PrimaryKey {
+                            column_names: vec!["bar".to_string().into(), "qux".to_string().into()],
+                            column_indices: vec![0, 1],
+                        }),
+                        indices: vec![],
+                    }
+                )
+            ],
+            schema.index_schemas()
         );
     }
 }
