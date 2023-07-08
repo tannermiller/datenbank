@@ -12,13 +12,14 @@ This is a toy database that I'm building just to learn more about how databases 
 3) ~File persistence~
 4) ~Primary Keys (other than treating the whole row as the primary)~
 5) Table Indices
-6) Write Ahead Log
-7) Joins
-8) Concurrency Support
+6) Range Scans
+7) Write Ahead Log
+8) Joins
+9) Concurrency Support
     1) Transactions
     2) Row & Table Locks
-9) Server
-10) Client library
-11) CLI using client lib
-12) Github actions for CI
-13) Arch diagrams
+10) Server
+11) Client library
+12) CLI using client lib
+13) Github actions for CI
+14) Arch diagrams
