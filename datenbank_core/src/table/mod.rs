@@ -35,7 +35,8 @@ pub struct Table<S: TablePageStore> {
     name: String,
     schema: Schema,
     store: S,
-    tree: BTree<S>,
+    primary: BTree<S>,
+    secondaries: Vec<BTree<S>>,
 }
 
 impl<S: TablePageStore> Table<S> {
@@ -51,14 +52,24 @@ impl<S: TablePageStore> Table<S> {
 
         let mut store = store_builder.build()?;
 
-        let tree = BTree::new(name.clone(), schema.clone(), store_builder)?;
-        store.put(0, header::encode(&name, &schema, &tree))?;
+        let primary = BTree::new(name.clone(), schema.clone(), store_builder)?;
+
+        let secondaries = schema
+            .index_schemas()
+            .into_iter()
+            .map(|(idx_name, idx_schema)| {
+                BTree::new(idx_name, idx_schema, store_builder).map_err(Into::into)
+            })
+            .collect::<Result<Vec<BTree<S>>, Error>>()?;
+
+        store.put(0, header::encode(&name, &schema, &primary, &secondaries))?;
 
         Ok(Table {
             name,
             schema,
             store,
-            tree,
+            primary,
+            secondaries,
         })
     }
 
@@ -72,13 +83,14 @@ impl<S: TablePageStore> Table<S> {
             return Ok(None);
         }
 
-        let (name, schema, tree) = header::decode(&header_page, store_builder)?;
+        let (name, schema, primary, secondaries) = header::decode(&header_page, store_builder)?;
 
         Ok(Some(Table {
             name,
             schema,
             store,
-            tree,
+            primary,
+            secondaries,
         }))
     }
 
@@ -92,11 +104,13 @@ impl<S: TablePageStore> Table<S> {
         // every column is present in our inserted columns.
         let values_in_order = self.schema.put_columns_in_order(columns, values)?;
 
-        let (rows_affected, root_updated) = self.tree.insert(values_in_order)?;
+        let (rows_affected, root_updated) = self.primary.insert(values_in_order)?;
 
         if root_updated {
-            self.store
-                .put(0, header::encode(&self.name, &self.schema, &self.tree))?;
+            self.store.put(
+                0,
+                header::encode(&self.name, &self.schema, &self.primary, &self.secondaries),
+            )?;
         }
 
         Ok(rows_affected)
@@ -108,11 +122,11 @@ impl<S: TablePageStore> Table<S> {
         columns: Vec<Rc<String>>,
         rp: impl Predicate<S>,
     ) -> Result<Vec<Vec<Column>>, Error> {
-        self.tree.scan(columns, rp).map_err(Into::into)
+        self.primary.scan(columns, rp).map_err(Into::into)
     }
 
     pub fn lookup(&mut self, key: &Vec<u8>) -> Result<Option<Vec<Column>>, Error> {
-        self.tree.lookup(key).map_err(Into::into)
+        self.primary.lookup(key).map_err(Into::into)
     }
 }
 
@@ -135,7 +149,10 @@ mod test {
                 ("everything_nice".into(), ColumnType::Bool),
             ],
             None,
-            vec![],
+            vec![
+                ("su_sp", vec!["sugar", "spice"]),
+                ("ev_sp", vec!["everything_nice", "spice"]),
+            ],
         )
         .unwrap();
         let mut store_builder = MemoryManager::new(1024 * 64).builder(&name).unwrap();
@@ -154,21 +171,29 @@ mod test {
             let table_header_page = store.get(0).unwrap();
             assert_eq!(
                 vec![
-                    18, b'b', b'a', b'b', b'i', b'e', b's', b'_', b'f', b'i', b'r', b's', b't',
-                    b'_', b't', b'a', b'b', b'l', b'e', 0, 42, 0, 3, 1, 0, 5, 115, 117, 103, 97,
-                    114, 0, 0, 5, 115, 112, 105, 99, 101, 0, 10, 2, 0, 15, 101, 118, 101, 114, 121,
-                    116, 104, 105, 110, 103, 95, 110, 105, 99, 101, 0, 0, 0, 0, 0, 8, 0, 0, 7, 255,
-                    0, 0, 0, 0
+                    18, 98, 97, 98, 105, 101, 115, 95, 102, 105, 114, 115, 116, 95, 116, 97, 98,
+                    108, 101, 0, 98, 0, 3, 1, 0, 5, 115, 117, 103, 97, 114, 0, 0, 5, 115, 112, 105,
+                    99, 101, 0, 10, 2, 0, 15, 101, 118, 101, 114, 121, 116, 104, 105, 110, 103, 95,
+                    110, 105, 99, 101, 0, 0, 0, 2, 0, 5, 115, 117, 95, 115, 112, 0, 2, 0, 5, 115,
+                    117, 103, 97, 114, 0, 5, 115, 112, 105, 99, 101, 0, 5, 101, 118, 95, 115, 112,
+                    0, 2, 0, 15, 101, 118, 101, 114, 121, 116, 104, 105, 110, 103, 95, 110, 105,
+                    99, 101, 0, 5, 115, 112, 105, 99, 101, 0, 8, 0, 0, 7, 255, 0, 0, 0, 0, 0, 2, 0,
+                    8, 0, 0, 0, 119, 0, 0, 0, 0, 0, 8, 0, 0, 0, 119, 0, 0, 0, 0
                 ],
                 table_header_page
             );
 
-            let (decoded_name, decoded_schema, decoded_btree) =
+            let (decoded_name, decoded_schema, decoded_btree, decoded_secondaries) =
                 header::decode(&table_header_page, &mut store_builder).unwrap();
             assert_eq!(name, decoded_name);
             assert_eq!(schema, decoded_schema);
-            assert_eq!(table.tree.order, decoded_btree.order);
-            assert_eq!(table.tree.root, decoded_btree.root);
+            assert_eq!(table.primary.order, decoded_btree.order);
+            assert_eq!(table.primary.root, decoded_btree.root);
+            assert_eq!(2, decoded_secondaries.len());
+            for i in 0..2 {
+                assert_eq!(table.secondaries[i].order, decoded_secondaries[i].order);
+                assert_eq!(table.secondaries[i].root, decoded_secondaries[i].root);
+            }
         }
 
         let loaded_table = Table::load(&mut store_builder).unwrap().unwrap();
@@ -208,7 +233,7 @@ mod test {
         let mut store = store_builder.build().unwrap();
         let root_id = {
             let table_header_page = store.get(0).unwrap();
-            let (_, _, decoded_btree) =
+            let (_, _, decoded_btree, _) =
                 header::decode(&table_header_page, &mut store_builder).unwrap();
             decoded_btree.root.unwrap()
         };
@@ -258,7 +283,7 @@ mod test {
         let mut store = store_builder.build().unwrap();
         let root_id = {
             let table_header_page = store.get(0).unwrap();
-            let (_, _, decoded_btree) =
+            let (_, _, decoded_btree, _) =
                 header::decode(&table_header_page, &mut store_builder).unwrap();
             decoded_btree.root.unwrap()
         };

@@ -9,6 +9,7 @@ use nom::sequence::{pair, tuple};
 use nom::{Err as NomErr, IResult};
 
 use super::{ColumnType, Index, PrimaryKey, Schema};
+use crate::encode::{write_len, write_len_and_bytes};
 use crate::parser::identifier_bytes;
 
 pub fn encode(schema: &Schema) -> Vec<u8> {
@@ -65,17 +66,6 @@ fn encode_column_type(name: &str, column: &ColumnType, bytes: &mut Vec<u8>) {
         }
         _ => {}
     }
-}
-
-fn write_len(buffer: &mut Vec<u8>, len: usize) {
-    buffer
-        .write_all(&(len as u16).to_be_bytes())
-        .expect("can't fail writing to vec");
-}
-
-fn write_len_and_bytes(buffer: &mut Vec<u8>, bytes: &[u8]) {
-    write_len(buffer, bytes.len());
-    buffer.write_all(bytes).expect("can't fail writing to vec");
 }
 
 pub fn decode(input: &[u8]) -> IResult<&[u8], Schema> {

@@ -1,5 +1,6 @@
 pub mod api;
 mod cache;
+mod encode;
 mod exec;
 mod key;
 mod pagestore;
