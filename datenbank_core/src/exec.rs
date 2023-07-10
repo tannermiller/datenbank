@@ -86,6 +86,7 @@ fn parser_schema_to_table_schema(
                 ParserColumnType::Int => ColumnType::Int,
                 ParserColumnType::Bool => ColumnType::Bool,
                 ParserColumnType::VarChar(size) => ColumnType::VarChar(size),
+                ParserColumnType::LongBlob(size) => ColumnType::LongBlob(size),
             };
             (ps.column_name.to_string(), ct)
         })
@@ -367,7 +368,7 @@ fn evaluate_equality_op(left: &Column, op: EqualityOp, right: &Column) -> bool {
 mod test {
     use super::*;
     use crate::pagestore::{Memory, MemoryBuilder};
-    use crate::row::{RowCol, RowVarChar};
+    use crate::row::{RowBytes, RowCol};
 
     // TODO: Test with primary_keys
 
@@ -459,7 +460,7 @@ mod test {
             body: vec![
                 RowCol::Int(7),
                 RowCol::Bool(false),
-                RowCol::VarChar(RowVarChar {
+                RowCol::VarChar(RowBytes {
                     inline: "Hello, World!".into(),
                     next_page: None,
                 }),

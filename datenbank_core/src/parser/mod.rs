@@ -51,6 +51,7 @@ pub enum ColumnType {
     VarChar(u16),
     Int,
     Bool,
+    LongBlob(u32),
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -58,6 +59,7 @@ pub enum Literal {
     String(String),
     Int(i32),
     Bool(bool),
+    Bytes(Vec<u8>),
 }
 
 impl std::fmt::Display for Literal {
@@ -66,6 +68,13 @@ impl std::fmt::Display for Literal {
             Literal::String(s) => write!(f, "\"{s}\""),
             Literal::Int(i) => i.fmt(f),
             Literal::Bool(b) => write!(f, "{}", b.to_string().to_uppercase()),
+            Literal::Bytes(bs) => {
+                write!(f, "X'")?;
+                for b in bs {
+                    write!(f, "{:02X}", b)?;
+                }
+                write!(f, "'")
+            }
         }
     }
 }
@@ -169,6 +178,31 @@ pub enum Terminal<'a> {
     Literal(Literal),
 }
 
+fn hex_string_to_bytes(s: &str) -> Result<Vec<u8>, Error> {
+    if s.len() < 3 || &s[..2] != "X'" || &s[(s.len() - 1)..] != "'" {
+        return Err(Error {
+            msg: "hex literal needs to start with \"X'\" and end with \"'\"".into(),
+        });
+    }
+
+    // slice out of the delimiters
+    let hex_str = &s[2..(s.len() - 1)];
+
+    if hex_str.len() % 2 != 0 {
+        return Err(Error {
+            msg: "hex literal must have an even number of chars".into(),
+        });
+    };
+
+    hex_str
+        .chars()
+        .enumerate()
+        .step_by(2)
+        .map(|(i, _)| u8::from_str_radix(&hex_str[i..i + 2], 16))
+        .collect::<Result<Vec<u8>, std::num::ParseIntError>>()
+        .map_err(|e| Error { msg: e.to_string() })
+}
+
 // this is just a test util that can be shared across all parser testing
 #[cfg(test)]
 fn parse_check<'a, T, F>(f: F, input: &'a str, expected: Option<T>)
@@ -206,5 +240,27 @@ mod test {
         check("foo_bar_baz", Some("foo_bar_baz"));
         check("foo_2_baz", Some("foo_2_baz"));
         check("_must_not_start", None);
+    }
+
+    #[test]
+    fn test_literal_bytes_to_string() {
+        assert_eq!(
+            "X'2A0164'".to_string(),
+            Literal::Bytes(vec![42, 1, 100]).to_string(),
+        );
+    }
+
+    #[test]
+    fn test_hex_string_to_bytes() {
+        assert_eq!(vec![42, 1, 100], hex_string_to_bytes("X'2A0164'").unwrap());
+    }
+
+    #[test]
+    fn test_bytes_to_hex_reflective() {
+        let input = "X'2A0164'";
+        assert_eq!(
+            input,
+            Literal::Bytes(hex_string_to_bytes(input).unwrap()).to_string(),
+        );
     }
 }

@@ -74,6 +74,7 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_ke
     foo INT
     bar BOOL
     baz VARCHAR(16)
+    qux LONGBLOB(32)
 {}}}",
         if with_primary_key {
             "    PRIMARY KEY (baz, foo)\n"
@@ -87,33 +88,36 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_ke
     // insert in order
     check_exec(
         &mut db,
-        "INSERT INTO testing (foo, bar, baz) VALUES (1, false, \"hello\")",
+        "INSERT INTO testing (foo, bar, baz, qux) VALUES (1, false, \"hello\", X'776f726c64')",
         1,
     );
 
     // insert columns out of order
     check_exec(
         &mut db,
-        "INSERT INTO testing (baz, foo, bar) VALUES (\"world\", 2, true)",
+        "INSERT INTO testing (baz, foo, qux, bar) VALUES (\"world\", 2, X'68656c6c6f', true)",
         1,
     );
 
     // insert multiple
     check_exec(
         &mut db,
-        "INSERT INTO testing (foo, bar, baz) VALUES (3, false, \"whats\"), (4, true, \"up\")",
+        "INSERT INTO testing (foo, bar, baz, qux) VALUES (3, false, \"whats\", X'7570'), (4, true, \"up\", X'7768617473')",
         2,
     );
 
     // insert duplicate row, should error
     check_exec_err(
         &mut db,
-        "INSERT INTO testing (foo, bar, baz) VALUES (1, false, \"hello\")",
+        "INSERT INTO testing (foo, bar, baz, qux) VALUES (1, false, \"hello\", X'776f726c64')",
         Error::Exec(ExecError::Table(TableError::BTree(
             BTreeError::DuplicateEntry(if with_primary_key {
                 vec![b'h', b'e', b'l', b'l', b'o', b'_', 0, 0, 0, 1]
             } else {
-                vec![0, 0, 0, 1, b'_', 0, b'_', b'h', b'e', b'l', b'l', b'o']
+                vec![
+                    0, 0, 0, 1, b'_', 0, b'_', b'h', b'e', b'l', b'l', b'o', b'_', b'w', b'o',
+                    b'r', b'l', b'd',
+                ]
             }),
         ))),
     );
@@ -129,21 +133,25 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_ke
                     Column::Int(1),
                     Column::Bool(false),
                     Column::VarChar("hello".to_string()),
+                    Column::LongBlob(b"world".to_vec()),
                 ],
                 vec![
                     Column::Int(4),
                     Column::Bool(true),
                     Column::VarChar("up".to_string()),
+                    Column::LongBlob(b"whats".to_vec()),
                 ],
                 vec![
                     Column::Int(3),
                     Column::Bool(false),
                     Column::VarChar("whats".to_string()),
+                    Column::LongBlob(b"up".to_vec()),
                 ],
                 vec![
                     Column::Int(2),
                     Column::Bool(true),
                     Column::VarChar("world".to_string()),
+                    Column::LongBlob(b"hello".to_vec()),
                 ],
             ]
         } else {
@@ -152,21 +160,25 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_ke
                     Column::Int(1),
                     Column::Bool(false),
                     Column::VarChar("hello".to_string()),
+                    Column::LongBlob(b"world".to_vec()),
                 ],
                 vec![
                     Column::Int(2),
                     Column::Bool(true),
                     Column::VarChar("world".to_string()),
+                    Column::LongBlob(b"hello".to_vec()),
                 ],
                 vec![
                     Column::Int(3),
                     Column::Bool(false),
                     Column::VarChar("whats".to_string()),
+                    Column::LongBlob(b"up".to_vec()),
                 ],
                 vec![
                     Column::Int(4),
                     Column::Bool(true),
                     Column::VarChar("up".to_string()),
+                    Column::LongBlob(b"whats".to_vec()),
                 ],
             ]
         },
@@ -199,6 +211,7 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_ke
             Column::Int(1),
             Column::Bool(false),
             Column::VarChar("hello".to_string()),
+            Column::LongBlob(b"world".to_vec()),
         ]],
     );
 
@@ -209,6 +222,7 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_ke
             Column::Int(1),
             Column::Bool(false),
             Column::VarChar("hello".to_string()),
+            Column::LongBlob(b"world".to_vec()),
         ]],
     );
 
@@ -234,6 +248,7 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_ke
             Column::Int(1),
             Column::Bool(false),
             Column::VarChar("hello".to_string()),
+            Column::LongBlob(b"world".to_vec()),
         ]],
     );
 
@@ -244,6 +259,7 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_ke
             Column::Int(1),
             Column::Bool(false),
             Column::VarChar("hello".to_string()),
+            Column::LongBlob(b"world".to_vec()),
         ]],
     );
 
@@ -254,6 +270,18 @@ fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_ke
             Column::Int(1),
             Column::Bool(false),
             Column::VarChar("hello".to_string()),
+            Column::LongBlob(b"world".to_vec()),
+        ]],
+    );
+
+    check_query(
+        &mut db,
+        "SELECT * FROM testing WHERE foo = 1 AND baz = \"hello\" AND qux = X'776f726c64'",
+        vec![vec![
+            Column::Int(1),
+            Column::Bool(false),
+            Column::VarChar("hello".to_string()),
+            Column::LongBlob(b"world".to_vec()),
         ]],
     );
 

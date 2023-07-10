@@ -1,7 +1,7 @@
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{
-    char, multispace0, multispace1, newline, space0, space1, u16 as char_u16,
+    char, multispace0, multispace1, newline, space0, space1, u16 as char_u16, u32 as char_u32,
 };
 use nom::combinator::all_consuming;
 use nom::combinator::opt;
@@ -53,8 +53,21 @@ fn column_type_bool(input: &str) -> IResult<&str, ColumnType> {
     tag_no_case("bool")(input).map(|(rest, _)| (rest, ColumnType::Bool))
 }
 
+fn column_type_longblob(input: &str) -> IResult<&str, ColumnType> {
+    pair(
+        tag_no_case("longblob"),
+        delimited(char('('), char_u32, char(')')),
+    )(input)
+    .map(|(rest, (_, size))| (rest, ColumnType::LongBlob(size)))
+}
+
 fn column_type(input: &str) -> IResult<&str, ColumnType> {
-    alt((column_type_varchar, column_type_int, column_type_bool))(input)
+    alt((
+        column_type_varchar,
+        column_type_int,
+        column_type_bool,
+        column_type_longblob,
+    ))(input)
 }
 
 fn column_schema(input: &str) -> IResult<&str, ColumnSchema> {
@@ -128,6 +141,11 @@ mod test {
         check("VarChar()", None);
         check("VarChar(840)", Some(ColumnType::VarChar(840)));
         check("VarChar(10000000000000000000000)", None);
+        check("longblob(1)", Some(ColumnType::LongBlob(1)));
+        check("LongBlob(1)", Some(ColumnType::LongBlob(1)));
+        check("LongBlob()", None);
+        check("LongBlob(66000)", Some(ColumnType::LongBlob(66000)));
+        check("LongBlob(10000000000000000000000)", None);
     }
 
     #[test]
@@ -182,6 +200,7 @@ mod test {
     SomeInt INT
   some_bool Bool
 VC82 VarChar(82)
+ lonG_Blob_big LONGblob(100000)
 }
 ",
             Some(Input::Create {
@@ -190,6 +209,7 @@ VC82 VarChar(82)
                     ColumnSchema::new("SomeInt", ColumnType::Int),
                     ColumnSchema::new("some_bool", ColumnType::Bool),
                     ColumnSchema::new("VC82", ColumnType::VarChar(82)),
+                    ColumnSchema::new("lonG_Blob_big", ColumnType::LongBlob(100000)),
                 ],
                 primary_key: None,
             }),
@@ -200,6 +220,7 @@ VC82 VarChar(82)
     SomeInt INT
     some_bool Bool
     VC82 VarChar(82)
+    lonG_Blob_big LONGblob(100000)
 }",
             Some(Input::Create {
                 table_name: "Foo",
@@ -207,6 +228,7 @@ VC82 VarChar(82)
                     ColumnSchema::new("SomeInt", ColumnType::Int),
                     ColumnSchema::new("some_bool", ColumnType::Bool),
                     ColumnSchema::new("VC82", ColumnType::VarChar(82)),
+                    ColumnSchema::new("lonG_Blob_big", ColumnType::LongBlob(100000)),
                 ],
                 primary_key: None,
             }),
@@ -217,6 +239,7 @@ VC82 VarChar(82)
     SomeInt INT
     some_bool Bool
     VC82 VarChar(82)
+    lonG_Blob_big LONGblob(100000)
     PRIMARY KEY (SomeInt)
 }",
             Some(Input::Create {
@@ -225,6 +248,7 @@ VC82 VarChar(82)
                     ColumnSchema::new("SomeInt", ColumnType::Int),
                     ColumnSchema::new("some_bool", ColumnType::Bool),
                     ColumnSchema::new("VC82", ColumnType::VarChar(82)),
+                    ColumnSchema::new("lonG_Blob_big", ColumnType::LongBlob(100000)),
                 ],
                 primary_key: Some(vec!["SomeInt"]),
             }),
@@ -235,10 +259,12 @@ VC82 VarChar(82)
     SomeInt INT
     some_bool Bool
     VC82 VarChar(82)
+    lonG_Blob_big LONGblob(100000)
     PRIMARY KEY (
         SomeInt,
         some_bool,
-        VC82
+        VC82,
+        lonG_Blob_big
     )
 }",
             Some(Input::Create {
@@ -247,8 +273,9 @@ VC82 VarChar(82)
                     ColumnSchema::new("SomeInt", ColumnType::Int),
                     ColumnSchema::new("some_bool", ColumnType::Bool),
                     ColumnSchema::new("VC82", ColumnType::VarChar(82)),
+                    ColumnSchema::new("lonG_Blob_big", ColumnType::LongBlob(100000)),
                 ],
-                primary_key: Some(vec!["SomeInt", "some_bool", "VC82"]),
+                primary_key: Some(vec!["SomeInt", "some_bool", "VC82", "lonG_Blob_big"]),
             }),
         );
     }

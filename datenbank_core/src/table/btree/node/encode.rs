@@ -184,7 +184,7 @@ mod test {
     use super::*;
 
     use super::super::Leaf;
-    use crate::row::{Row, RowCol, RowVarChar};
+    use crate::row::{Row, RowBytes, RowCol};
 
     #[test]
     fn test_encode_decode_leaf() {
@@ -196,9 +196,13 @@ mod test {
                     body: vec![
                         RowCol::Int(7),
                         RowCol::Bool(true),
-                        RowCol::VarChar(RowVarChar {
+                        RowCol::VarChar(RowBytes {
                             inline: b"Hello, World!".to_vec(),
                             next_page: Some(11),
+                        }),
+                        RowCol::LongBlob(RowBytes {
+                            inline: b"foo bar baz".to_vec(),
+                            next_page: Some(12),
                         }),
                     ],
                 }],

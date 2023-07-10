@@ -36,8 +36,8 @@ impl KeyPart for &RowCol {
         match self {
             RowCol::Int(i) => key.extend(i.to_be_bytes()),
             RowCol::Bool(b) => key.push(if *b { 1 } else { 0 }),
-            RowCol::VarChar(vc) => {
-                key.extend(&vc.inline[..vc.inline.len().min(MAX_KEY_VAR_CHAR_LEN)]);
+            RowCol::VarChar(rb) | RowCol::LongBlob(rb) => {
+                key.extend(&rb.inline[..rb.inline.len().min(MAX_KEY_VAR_CHAR_LEN)]);
             }
         }
     }
@@ -51,6 +51,9 @@ impl KeyPart for &Literal {
             Literal::String(s) => {
                 let s = s.as_bytes();
                 key.extend(&s[..s.len().min(MAX_KEY_VAR_CHAR_LEN)]);
+            }
+            Literal::Bytes(bs) => {
+                key.extend(&bs[..bs.len().min(MAX_KEY_VAR_CHAR_LEN)]);
             }
         }
     }

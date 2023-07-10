@@ -4,7 +4,7 @@ use std::rc::Rc;
 use nom::combinator::opt;
 use nom::error::{make_error, ErrorKind};
 use nom::multi::{length_count, length_value};
-use nom::number::complete::{be_u16, be_u8};
+use nom::number::complete::{be_u16, be_u32, be_u8};
 use nom::{Err as NomErr, IResult};
 
 use super::{ColumnType, PrimaryKey, Schema};
@@ -54,10 +54,18 @@ fn encode_column_type(name: &str, column: &ColumnType, bytes: &mut Vec<u8>) {
         .write_all(name.as_bytes())
         .expect("can't fail writing to vec");
 
-    if let ColumnType::VarChar(max_size) = column {
-        bytes
-            .write_all(&max_size.to_be_bytes())
-            .expect("can't fail writing to vec");
+    match column {
+        ColumnType::VarChar(max_size) => {
+            bytes
+                .write_all(&max_size.to_be_bytes())
+                .expect("can't fail writing to vec");
+        }
+        ColumnType::LongBlob(max_size) => {
+            bytes
+                .write_all(&max_size.to_be_bytes())
+                .expect("can't fail writing to vec");
+        }
+        _ => {}
     }
 }
 
@@ -116,6 +124,10 @@ fn parse_column_type(input: &[u8]) -> IResult<&[u8], (String, ColumnType)> {
             let (rest, size) = be_u16(rest)?;
             (rest, ColumnType::VarChar(size))
         }
+        ColumnType::LongBlob(_) => {
+            let (rest, size) = be_u32(rest)?;
+            (rest, ColumnType::LongBlob(size))
+        }
         ct => (rest, ct),
     };
 
@@ -137,6 +149,7 @@ mod test {
                 ("wonder".into(), ColumnType::Int),
                 ("whats".into(), ColumnType::Bool),
                 ("next".into(), ColumnType::VarChar(10)),
+                ("nothing".into(), ColumnType::LongBlob(32)),
             ],
             None,
         )
@@ -144,8 +157,9 @@ mod test {
 
         assert_eq!(
             vec![
-                0, 3, 1, 0, 6, 119, 111, 110, 100, 101, 114, 2, 0, 5, 119, 104, 97, 116, 115, 0, 0,
-                4, 110, 101, 120, 116, 0, 10
+                0, 4, 1, 0, 6, 119, 111, 110, 100, 101, 114, 2, 0, 5, 119, 104, 97, 116, 115, 0, 0,
+                4, 110, 101, 120, 116, 0, 10, 3, 0, 7, 110, 111, 116, 104, 105, 110, 103, 0, 0, 0,
+                32
             ],
             schema.encode()
         );
@@ -158,6 +172,7 @@ mod test {
                 ("wonder".into(), ColumnType::Int),
                 ("whats".into(), ColumnType::Bool),
                 ("next".into(), ColumnType::VarChar(10)),
+                ("nothing".into(), ColumnType::LongBlob(32)),
             ],
             Some(vec!["wonder".into(), "whats".into()]),
         )
@@ -165,9 +180,9 @@ mod test {
 
         assert_eq!(
             vec![
-                0, 3, 1, 0, 6, 119, 111, 110, 100, 101, 114, 2, 0, 5, 119, 104, 97, 116, 115, 0, 0,
-                4, 110, 101, 120, 116, 0, 10, 0, 2, 0, 6, 119, 111, 110, 100, 101, 114, 0, 5, 119,
-                104, 97, 116, 115,
+                0, 4, 1, 0, 6, 119, 111, 110, 100, 101, 114, 2, 0, 5, 119, 104, 97, 116, 115, 0, 0,
+                4, 110, 101, 120, 116, 0, 10, 3, 0, 7, 110, 111, 116, 104, 105, 110, 103, 0, 0, 0,
+                32, 0, 2, 0, 6, 119, 111, 110, 100, 101, 114, 0, 5, 119, 104, 97, 116, 115
             ],
             schema.encode()
         );
@@ -184,6 +199,7 @@ mod test {
                 ("the".into(), ColumnType::VarChar(9999)),
                 ("pain".into(), ColumnType::Int),
                 ("below".into(), ColumnType::Int),
+                ("vitamin_r".into(), ColumnType::LongBlob(42)),
             ],
             None,
         )
@@ -205,6 +221,7 @@ mod test {
                 ("the".into(), ColumnType::VarChar(9999)),
                 ("pain".into(), ColumnType::Int),
                 ("below".into(), ColumnType::Int),
+                ("vitamin_r".into(), ColumnType::LongBlob(42)),
             ],
             Some(vec!["below".into(), "next".into(), "the".into()]),
         )

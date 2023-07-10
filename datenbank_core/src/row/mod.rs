@@ -29,11 +29,12 @@ pub struct Row {
 pub enum RowCol {
     Int(i32),
     Bool(bool),
-    VarChar(RowVarChar),
+    VarChar(RowBytes),
+    LongBlob(RowBytes),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RowVarChar {
+pub struct RowBytes {
     pub(crate) inline: Vec<u8>,
     pub(crate) next_page: Option<usize>,
 }
@@ -56,33 +57,7 @@ impl Row {
                 RowCol::Int(i) => Column::Int(*i),
                 RowCol::Bool(b) => Column::Bool(*b),
                 RowCol::VarChar(vc) => {
-                    let mut vc_data = vc.inline.to_vec();
-
-                    if let Some(data_page_id) = vc.next_page {
-                        let mut data_page_id = data_page_id;
-                        loop {
-                            let vc_page = data_cache.get(data_page_id)?;
-
-                            if vc_page.len() < 4 {
-                                break;
-                            }
-
-                            let next_pointer =
-                                u32::from_be_bytes(vc_page[..4].try_into().map_err(
-                                    |e: std::array::TryFromSliceError| {
-                                        Error::InvalidColumn(e.to_string())
-                                    },
-                                )?);
-
-                            vc_data.extend(&vc_page[4..]);
-
-                            if next_pointer != 0 {
-                                data_page_id = next_pointer as usize;
-                            } else {
-                                break;
-                            }
-                        }
-                    }
+                    let vc_data = load_full_row_bytes(data_cache, vc)?;
 
                     match String::from_utf8(vc_data) {
                         Ok(s) => Column::VarChar(s),
@@ -90,6 +65,10 @@ impl Row {
                             return Err(Error::InvalidColumn(e.to_string()));
                         }
                     }
+                }
+                RowCol::LongBlob(lb) => {
+                    let lb_data = load_full_row_bytes(data_cache, lb)?;
+                    Column::LongBlob(lb_data)
                 }
             };
             row_values.push(val);
@@ -108,6 +87,39 @@ impl Row {
             None => key::build(&self.body),
         }
     }
+}
+
+fn load_full_row_bytes<S: TablePageStore>(
+    data_cache: &mut Cache<S, Vec<u8>>,
+    rb: &RowBytes,
+) -> Result<Vec<u8>, Error> {
+    let mut data = rb.inline.to_vec();
+
+    if let Some(data_page_id) = rb.next_page {
+        let mut data_page_id = data_page_id;
+        loop {
+            let rb_page = data_cache.get(data_page_id)?;
+
+            if rb_page.len() < 4 {
+                break;
+            }
+
+            let next_pointer =
+                u32::from_be_bytes(rb_page[..4].try_into().map_err(
+                    |e: std::array::TryFromSliceError| Error::InvalidColumn(e.to_string()),
+                )?);
+
+            data.extend(&rb_page[4..]);
+
+            if next_pointer != 0 {
+                data_page_id = next_pointer as usize;
+            } else {
+                break;
+            }
+        }
+    }
+
+    Ok(data)
 }
 
 // ProcessedRow represents a row that has been split in order to fit into a Row, but may yet
@@ -168,10 +180,10 @@ impl ProcessedRow {
                 cache.put(page_id, page_to_write)?;
             }
 
-            // VarChar is our only variable length value so this is fine for now
+            // VarChar and LongBlob are the only variable length values so this is fine
             match row {
-                RowCol::VarChar(ref mut rvc) => {
-                    rvc.next_page = Some(first_next_page);
+                RowCol::VarChar(ref mut rb) | RowCol::LongBlob(ref mut rb) => {
+                    rb.next_page = Some(first_next_page);
                 }
                 _ => unreachable!(),
             }
@@ -190,34 +202,42 @@ pub(crate) fn process_columns(page_size: usize, cols: Vec<Column>) -> Result<Pro
             Column::Int(i) => Ok((RowCol::Int(i), None)),
             Column::Bool(b) => Ok((RowCol::Bool(b), None)),
             Column::VarChar(s) => {
-                let bs = s.into_bytes();
-                let (inline, data_pages) = if bs.len() > MAX_INLINE_VAR_LEN_COL_SIZE {
-                    let inline = bs[..MAX_INLINE_VAR_LEN_COL_SIZE].to_vec();
-
-                    // chunk out the remaining and assign page ids to them, see the below
-                    // comment for description of the 5 byte header.
-                    let data_pages: Vec<Vec<u8>> = bs[MAX_INLINE_VAR_LEN_COL_SIZE..]
-                        .chunks(page_size - 5)
-                        .map(|b| b.to_vec())
-                        .collect();
-
-                    (inline, Some(data_pages))
-                } else {
-                    (bs, None)
-                };
-
-                Ok((
-                    RowCol::VarChar(RowVarChar {
-                        inline,
-                        next_page: None,
-                    }),
-                    data_pages,
-                ))
+                let (rb, data_pages) = full_bytes_to_row_bytes(page_size, s.into_bytes());
+                Ok((RowCol::VarChar(rb), data_pages))
+            }
+            Column::LongBlob(lb) => {
+                let (rb, data_pages) = full_bytes_to_row_bytes(page_size, lb);
+                Ok((RowCol::LongBlob(rb), data_pages))
             }
         })
         .collect::<Result<Vec<(RowCol, Option<Vec<Vec<u8>>>)>, Error>>()?;
 
     Ok(ProcessedRow { columns })
+}
+
+fn full_bytes_to_row_bytes(page_size: usize, bs: Vec<u8>) -> (RowBytes, Option<Vec<Vec<u8>>>) {
+    let (inline, data_pages) = if bs.len() > MAX_INLINE_VAR_LEN_COL_SIZE {
+        let inline = bs[..MAX_INLINE_VAR_LEN_COL_SIZE].to_vec();
+
+        // chunk out the remaining and assign page ids to them, see the below
+        // comment for description of the 5 byte header.
+        let data_pages: Vec<Vec<u8>> = bs[MAX_INLINE_VAR_LEN_COL_SIZE..]
+            .chunks(page_size - 5)
+            .map(|b| b.to_vec())
+            .collect();
+
+        (inline, Some(data_pages))
+    } else {
+        (bs, None)
+    };
+
+    (
+        RowBytes {
+            inline,
+            next_page: None,
+        },
+        data_pages,
+    )
 }
 
 // A Predicate is used to select rows to return during a scan;
@@ -266,6 +286,7 @@ mod test {
             Column::Int(7),
             Column::Bool(true),
             Column::VarChar("0123456789".to_string()),
+            Column::LongBlob(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
         ];
         check(
             64,
@@ -275,8 +296,15 @@ mod test {
                     (RowCol::Int(7), None),
                     (RowCol::Bool(true), None),
                     (
-                        RowCol::VarChar(RowVarChar {
+                        RowCol::VarChar(RowBytes {
                             inline: b"0123456789".to_vec(),
+                            next_page: None,
+                        }),
+                        None,
+                    ),
+                    (
+                        RowCol::LongBlob(RowBytes {
+                            inline: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
                             next_page: None,
                         }),
                         None,
@@ -288,10 +316,14 @@ mod test {
         let base_str = "1".repeat(MAX_INLINE_VAR_LEN_COL_SIZE);
         let mut var_char_value = base_str.clone();
         var_char_value.extend("0123456789".chars());
+        let base_bytes = [1u8].repeat(MAX_INLINE_VAR_LEN_COL_SIZE);
+        let mut long_blob_value = base_bytes.clone();
+        long_blob_value.extend(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
         let cols = vec![
             Column::Int(7),
             Column::Bool(true),
             Column::VarChar(var_char_value),
+            Column::LongBlob(long_blob_value),
         ];
         check(
             8, // absurdly low to verify paging is correct
@@ -301,7 +333,7 @@ mod test {
                     (RowCol::Int(7), None),
                     (RowCol::Bool(true), None),
                     (
-                        RowCol::VarChar(RowVarChar {
+                        RowCol::VarChar(RowBytes {
                             inline: base_str.as_bytes().to_vec(),
                             next_page: None,
                         }),
@@ -311,6 +343,13 @@ mod test {
                             "678".as_bytes().to_vec(),
                             "9".as_bytes().to_vec(),
                         ]),
+                    ),
+                    (
+                        RowCol::LongBlob(RowBytes {
+                            inline: base_bytes.to_vec(),
+                            next_page: None,
+                        }),
+                        Some(vec![vec![0, 1, 2], vec![3, 4, 5], vec![6, 7, 8], vec![9]]),
                     ),
                 ],
             }),
@@ -322,12 +361,13 @@ mod test {
         let mut store_builder = MemoryBuilder::new(64);
         let mut data_cache = Cache::new(store_builder.build("test").unwrap());
         let base_str = "1".repeat(MAX_INLINE_VAR_LEN_COL_SIZE);
+        let base_blob = [1].repeat(MAX_INLINE_VAR_LEN_COL_SIZE);
         let pr = ProcessedRow {
             columns: vec![
                 (RowCol::Int(7), None),
                 (RowCol::Bool(true), None),
                 (
-                    RowCol::VarChar(RowVarChar {
+                    RowCol::VarChar(RowBytes {
                         inline: base_str.as_bytes().to_vec(),
                         next_page: None,
                     }),
@@ -337,6 +377,13 @@ mod test {
                         "678".as_bytes().to_vec(),
                         "9".as_bytes().to_vec(),
                     ]),
+                ),
+                (
+                    RowCol::LongBlob(RowBytes {
+                        inline: base_blob.clone(),
+                        next_page: None,
+                    }),
+                    Some(vec![vec![0, 1, 2], vec![3, 4, 5], vec![6, 7, 8], vec![9]]),
                 ),
             ],
         };
@@ -348,18 +395,22 @@ mod test {
                 body: vec![
                     RowCol::Int(7),
                     RowCol::Bool(true),
-                    RowCol::VarChar(RowVarChar {
+                    RowCol::VarChar(RowBytes {
                         inline: base_str.as_bytes().to_vec(),
                         next_page: Some(1),
+                    }),
+                    RowCol::LongBlob(RowBytes {
+                        inline: base_blob,
+                        next_page: Some(5),
                     }),
                 ],
             },
             row
         );
 
-        // ensure that the 4 pages were allocated by seeing the next allocated one is 5
+        // ensure that the 8 pages were allocated by seeing the next allocated one is 9
         let mut store = store_builder.build("test").unwrap();
-        assert_eq!(5, store.allocate().unwrap());
+        assert_eq!(9, store.allocate().unwrap());
         assert_eq!(
             &vec![1u8, 0, 0, 0, 2, 48, 49, 50],
             data_cache.get(1).unwrap()
@@ -381,8 +432,12 @@ mod test {
             body: vec![
                 RowCol::Int(7),
                 RowCol::Bool(true),
-                RowCol::VarChar(RowVarChar {
+                RowCol::VarChar(RowBytes {
                     inline: "Hello, World!".as_bytes().to_vec(),
+                    next_page: None,
+                }),
+                RowCol::LongBlob(RowBytes {
+                    inline: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
                     next_page: None,
                 }),
             ],
@@ -393,6 +448,7 @@ mod test {
                 ("foo".into(), ColumnType::Int),
                 ("bar".into(), ColumnType::Bool),
                 ("baz".into(), ColumnType::VarChar(16)),
+                ("qux".into(), ColumnType::LongBlob(16)),
             ],
             None,
         )
@@ -403,6 +459,7 @@ mod test {
                 ("foo".into(), ColumnType::Int),
                 ("bar".into(), ColumnType::Bool),
                 ("baz".into(), ColumnType::VarChar(16)),
+                ("qux".into(), ColumnType::LongBlob(16)),
             ],
             Some(vec!["baz", "foo"]),
         )
@@ -411,7 +468,7 @@ mod test {
         assert_eq!(
             vec![
                 0, 0, 0, 7, b'_', 1, b'_', b'H', b'e', b'l', b'l', b'o', b',', b' ', b'W', b'o',
-                b'r', b'l', b'd', b'!'
+                b'r', b'l', b'd', b'!', b'_', 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
             ],
             row.key(&schema_no_pk)
         );

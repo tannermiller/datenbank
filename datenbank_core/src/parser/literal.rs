@@ -1,15 +1,17 @@
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::character::complete::{alphanumeric1, char, i32 as char_i32, one_of};
-use nom::combinator::value;
+use nom::character::complete::{alphanumeric1, char, hex_digit1, i32 as char_i32, one_of};
+use nom::combinator::{recognize, value};
+use nom::error::{make_error, ErrorKind};
 use nom::multi::many0;
 use nom::sequence::delimited;
-use nom::IResult;
+use nom::{Err as NomErr, IResult};
 
+use super::hex_string_to_bytes;
 use super::Literal;
 
 pub fn literal(input: &str) -> IResult<&str, Literal> {
-    alt((parse_bool, parse_int, parse_string))(input)
+    alt((parse_bool, parse_int, parse_hex, parse_string))(input)
 }
 
 pub fn parse_bool(input: &str) -> IResult<&str, Literal> {
@@ -73,6 +75,15 @@ fn parse_escaped_character(input: &str) -> IResult<&str, StringPart> {
     Ok((rest, StringPart::Char(ch)))
 }
 
+fn parse_hex(input: &str) -> IResult<&str, Literal> {
+    let (rest, hex_str) = recognize(delimited(tag_no_case("X'"), hex_digit1, tag("'")))(input)?;
+
+    let bytes = hex_string_to_bytes(hex_str)
+        .map_err(|_| NomErr::Failure(make_error(input, ErrorKind::Verify)))?;
+
+    Ok((rest, Literal::Bytes(bytes)))
+}
+
 #[cfg(test)]
 mod test {
     use super::super::parse_check;
@@ -90,6 +101,12 @@ mod test {
         check(
             "\"Hello, world!\"",
             Some(Literal::String("Hello, world!".to_string())),
+        );
+        check(
+            "X'48656C6C6F2C20576F726C6421'",
+            Some(Literal::Bytes(vec![
+                b'H', b'e', b'l', b'l', b'o', b',', b' ', b'W', b'o', b'r', b'l', b'd', b'!',
+            ])),
         );
     }
 
@@ -192,5 +209,27 @@ mod test {
             "\" Hello,\\n\\tWorld!_$%123\"",
             Some(Literal::String(" Hello,\n\tWorld!_$%123".to_string())),
         );
+    }
+
+    #[test]
+    fn test_parse_hex() {
+        fn check(input: &str, expected: Option<Literal>) {
+            parse_check(parse_hex, input, expected)
+        }
+
+        check(
+            "X'48656C6C6F2C20576F726C6421'",
+            Some(Literal::Bytes(vec![
+                b'H', b'e', b'l', b'l', b'o', b',', b' ', b'W', b'o', b'r', b'l', b'd', b'!',
+            ])),
+        );
+        check(
+            "X'48656c6c6f2c20576f726c6421'",
+            Some(Literal::Bytes(vec![
+                b'H', b'e', b'l', b'l', b'o', b',', b' ', b'W', b'o', b'r', b'l', b'd', b'!',
+            ])),
+        );
+        check("nope", None);
+        check("X'Nope'", None);
     }
 }

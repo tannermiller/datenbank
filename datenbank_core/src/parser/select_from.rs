@@ -79,8 +79,8 @@ fn terminal(input: &str) -> IResult<&str, Terminal> {
     alt((
         // gotta explicitly check for true/false first as they are otherwise valid identifiers
         map(parse_bool, Terminal::Literal),
-        map(identifier, Terminal::Identifier),
         map(literal, Terminal::Literal),
+        map(identifier, Terminal::Identifier),
     ))(input)
 }
 

@@ -177,6 +177,12 @@ impl Schema {
 
                     (ColumnType::Bool, Literal::Bool(b)) => Ok(Column::Bool(b)),
 
+                    (ColumnType::LongBlob(max_size), Literal::Bytes(bs))
+                        if bs.len() <= *max_size as usize =>
+                    {
+                        Ok(Column::LongBlob(bs))
+                    }
+
                     (ct, l) => Err(Error::InvalidColumn(format!(
                         "{l} is not congruent to column type {ct}",
                     ))),
@@ -200,6 +206,10 @@ impl Schema {
         //   * 4 for page of continued value
         // for int: 4 bytes
         // for bool: 1 bytes
+        // for longblob:
+        //   * 2 for inline len
+        //   * N for the acutal len
+        //   * 4 for page of continued value
         self.columns.iter().fold(0, |acc, (_, col)| match col {
             // size of type flag (1 byte) + len (2 bytes) + size of data itself + next page pointer
             // (4 bytes)
@@ -208,6 +218,11 @@ impl Schema {
             }
             ColumnType::Int => acc + 5,  // 4 bytes int + 1 for type flag
             ColumnType::Bool => acc + 2, // 1 bytes for bool val + 1 for type flag
+            // size of type flag (1 byte) + len (2 bytes) + size of data itself + next page pointer
+            // (4 bytes)
+            ColumnType::LongBlob(size) => {
+                acc + 7 + std::cmp::min(*size as usize, MAX_INLINE_VAR_LEN_COL_SIZE)
+            }
         }) + 4
     }
 
@@ -308,6 +323,8 @@ pub enum Column {
     Int(i32),
     // Bool is a boolean value.
     Bool(bool),
+    // LongBlob is a variable length blob with max length of (2^32) - 1 bytes.
+    LongBlob(Vec<u8>),
 }
 
 // A data type for a single column.
@@ -319,6 +336,8 @@ pub enum ColumnType {
     Int,
     // Bool is a boolean value.
     Bool,
+    // LongBlob is a variable length blob with max length of (2^32) - 1 bytes.
+    LongBlob(u32),
 }
 
 impl ColumnType {
@@ -327,6 +346,7 @@ impl ColumnType {
             ColumnType::VarChar(_) => 0,
             ColumnType::Int => 1,
             ColumnType::Bool => 2,
+            ColumnType::LongBlob(_) => 3,
         }
     }
 
@@ -335,6 +355,7 @@ impl ColumnType {
             0 => Ok(ColumnType::VarChar(0)),
             1 => Ok(ColumnType::Int),
             2 => Ok(ColumnType::Bool),
+            3 => Ok(ColumnType::LongBlob(0)),
             _ => Err(Error::UnableToDecode(
                 "unrecognized encoded column type".to_string(),
             )),
@@ -347,6 +368,7 @@ impl ColumnType {
             (ColumnType::VarChar(_), Literal::String(_))
                 | (ColumnType::Int, Literal::Int(_))
                 | (ColumnType::Bool, Literal::Bool(_))
+                | (ColumnType::LongBlob(_), Literal::Bytes(_))
         )
     }
 }
@@ -357,6 +379,7 @@ impl std::fmt::Display for ColumnType {
             ColumnType::VarChar(size) => write!(f, "VARCHAR({size})"),
             ColumnType::Int => write!(f, "INT"),
             ColumnType::Bool => write!(f, "BOOL"),
+            ColumnType::LongBlob(size) => write!(f, "LONGBLOB({size})"),
         }
     }
 }
@@ -399,6 +422,7 @@ mod test {
                 ("foo".into(), ColumnType::Int),
                 ("bar".into(), ColumnType::Bool),
                 ("qux".into(), ColumnType::VarChar(10)),
+                ("baz".into(), ColumnType::LongBlob(10)),
             ],
             None,
         )
@@ -446,6 +470,22 @@ mod test {
                 Column::Bool(false),
             ]]),
         );
+        check(
+            &schema,
+            &vec!["qux", "foo", "baz", "bar"],
+            vec![vec![
+                Literal::String("bump".to_string()),
+                Literal::Int(7),
+                Literal::Bytes(vec![42, 7, 100]),
+                Literal::Bool(false),
+            ]],
+            Some(vec![vec![
+                Column::VarChar("bump".to_string()),
+                Column::Int(7),
+                Column::LongBlob(vec![42, 7, 100]),
+                Column::Bool(false),
+            ]]),
+        )
     }
 
     #[test]
