@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
-use super::{Error, TablePageStore, TablePageStoreBuilder};
+use super::{Error, TablePageStore, TablePageStoreBuilder, TablePageStoreManager};
 
 #[derive(Debug)]
 pub struct Memory {
@@ -109,12 +109,12 @@ impl TablePageStore for Memory {
 }
 
 #[derive(Debug)]
-struct BuilderInner {
+struct ManagerInner {
     page_size: usize,
     tables: HashMap<String, Memory>,
 }
 
-impl BuilderInner {
+impl ManagerInner {
     fn build(&mut self, table_name: &str) -> Result<Memory, Error> {
         if let Some(page_store) = self.tables.get(table_name) {
             return Ok(Memory {
@@ -132,14 +132,14 @@ impl BuilderInner {
 }
 
 #[derive(Debug)]
-pub struct MemoryBuilder {
-    inner: Rc<RefCell<BuilderInner>>,
+pub struct MemoryManager {
+    inner: Rc<RefCell<ManagerInner>>,
 }
 
-impl MemoryBuilder {
+impl MemoryManager {
     pub fn new(page_size: usize) -> Self {
-        MemoryBuilder {
-            inner: Rc::new(RefCell::new(BuilderInner {
+        MemoryManager {
+            inner: Rc::new(RefCell::new(ManagerInner {
                 tables: HashMap::new(),
                 page_size,
             })),
@@ -147,11 +147,22 @@ impl MemoryBuilder {
     }
 }
 
-impl TablePageStoreBuilder for MemoryBuilder {
-    type TablePageStore = Memory;
+impl TablePageStoreManager for MemoryManager {
+    type PageStore = Memory;
+    type Builder = Memory;
 
-    fn build(&mut self, table_name: &str) -> Result<Self::TablePageStore, Error> {
+    fn builder(&mut self, table_name: &str) -> Result<Self::Builder, Error> {
         self.inner.borrow_mut().build(table_name)
+    }
+}
+
+impl TablePageStoreBuilder for Memory {
+    type PageStore = Memory;
+
+    fn build(&mut self) -> Result<Self::PageStore, Error> {
+        Ok(Self {
+            inner: self.inner.clone(),
+        })
     }
 }
 

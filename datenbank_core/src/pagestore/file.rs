@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use super::{Error, TablePageStore, TablePageStoreBuilder};
+use super::{Error, TablePageStore, TablePageStoreBuilder, TablePageStoreManager};
 
 // File maintains the second page (that is the 1st, since 0-indexed) to hold the initial free list.
 // The free list contains all the page ids, as big-endian u32s which have been allocated in the
@@ -244,19 +244,19 @@ fn read_u32_from_slice(slice: &[u8]) -> Result<u32, Error> {
 #[derive(Debug)]
 pub struct FileBuilder {
     page_size: u32,
-    directory: PathBuf,
+    file_path: PathBuf,
 }
 
 impl TablePageStoreBuilder for FileBuilder {
-    type TablePageStore = File;
+    type PageStore = File;
 
-    fn build(&mut self, table_name: &str) -> Result<Self::TablePageStore, Error> {
-        let file_path = self.directory.join(table_name).with_extension("dbdb");
+    fn build(&mut self) -> Result<Self::PageStore, Error> {
+        //let file_path = self.directory.join(&self.table_name).with_extension("dbdb");
         let mut file = fs::File::options()
             .read(true)
             .write(true)
             .create(true)
-            .open(file_path)
+            .open(&self.file_path)
             .map_err(|e| Error::Io(e.to_string()))?;
 
         let file_len = file
@@ -278,8 +278,26 @@ impl TablePageStoreBuilder for FileBuilder {
     }
 }
 
-impl FileBuilder {
-    // Get a new FileBuilder which will store the tables. If the path is not a directory, then the
+#[derive(Debug)]
+pub struct FileManager {
+    page_size: u32,
+    directory: PathBuf,
+}
+
+impl TablePageStoreManager for FileManager {
+    type PageStore = File;
+    type Builder = FileBuilder;
+
+    fn builder(&mut self, table_name: &str) -> Result<Self::Builder, Error> {
+        Ok(FileBuilder {
+            page_size: self.page_size,
+            file_path: self.directory.join(&table_name).with_extension("dbdb"),
+        })
+    }
+}
+
+impl FileManager {
+    // Get a new FileManager which will store the tables. If the path is not a directory, then the
     // parent directory of the file will be used.
     pub fn new(directory_path: impl Into<PathBuf>, page_size: u32) -> Self {
         let path = directory_path.into();
@@ -291,9 +309,9 @@ impl FileBuilder {
             path
         };
 
-        FileBuilder {
-            directory,
+        Self {
             page_size,
+            directory,
         }
     }
 }
@@ -313,8 +331,8 @@ mod test {
         // just cleaning up from a previous run, doesn't matter what happens
         let _ = fs::remove_file(&db_file_path);
 
-        let mut file_builder = FileBuilder::new(temp_dir, 16 * 1024);
-        let mut store = file_builder.build(table_name).unwrap();
+        let mut file_manager = FileManager::new(temp_dir, 16 * 1024);
+        let mut store = file_manager.builder(table_name).unwrap().build().unwrap();
         let next_page = store.allocate().unwrap();
         assert_eq!(2, next_page);
 
@@ -382,8 +400,8 @@ mod test {
         // just cleaning up from a previous run, doesn't matter what happens
         let _ = fs::remove_file(&db_file_path);
 
-        let mut file_builder = FileBuilder::new(temp_dir, 16 * 1024);
-        let mut store = file_builder.build(table_name).unwrap();
+        let mut file_manager = FileManager::new(temp_dir, 16 * 1024);
+        let mut store = file_manager.builder(table_name).unwrap().build().unwrap();
         let count = 10000;
 
         for i in 0..count {

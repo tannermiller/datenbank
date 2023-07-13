@@ -43,19 +43,19 @@ pub fn decode(input: &[u8]) -> IResult<&[u8], (usize, Option<usize>)> {
 mod test {
     use super::super::*;
     use super::*;
-    use crate::pagestore::MemoryBuilder;
+    use crate::pagestore::{MemoryManager, TablePageStoreBuilder, TablePageStoreManager};
 
     #[test]
     fn test_encode() {
-        let mut store_builder = MemoryBuilder::new(64 * 1024);
+        let mut store_builder = MemoryManager::new(64 * 1024).builder("something").unwrap();
         let empty_tree = BTree {
             name: "something".to_string(),
             schema: Schema::new(vec![], None).unwrap(),
             order: 1000,
             root: None,
-            node_cache: Cache::new(store_builder.build("something").unwrap()),
-            data_cache: Cache::new(store_builder.build("something").unwrap()),
-            store: store_builder.build("something").unwrap(),
+            node_cache: Cache::new(store_builder.build().unwrap()),
+            data_cache: Cache::new(store_builder.build().unwrap()),
+            store: store_builder.build().unwrap(),
         };
         assert_eq!(vec![0, 0, 3, 232, 0, 0, 0, 0], encode(&empty_tree));
 
@@ -64,9 +64,9 @@ mod test {
             schema: Schema::new(vec![], None).unwrap(),
             order: 1000,
             root: Some(7),
-            node_cache: Cache::new(store_builder.build("something").unwrap()),
-            data_cache: Cache::new(store_builder.build("something").unwrap()),
-            store: store_builder.build("something").unwrap(),
+            node_cache: Cache::new(store_builder.build().unwrap()),
+            data_cache: Cache::new(store_builder.build().unwrap()),
+            store: store_builder.build().unwrap(),
         };
         let encoded = encode(&filled_tree);
         assert_eq!(&vec![0, 0, 3, 232, 0, 0, 0, 7], &encoded);

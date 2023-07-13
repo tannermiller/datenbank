@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::cache::Cache;
 use crate::key;
-use crate::pagestore::{Error as PageStoreError, TablePageStore, TablePageStoreBuilder};
+use crate::pagestore::{Error as PageStoreError, TablePageStore, TablePageStoreManager};
 use crate::parser::{
     self, ColumnSchema, ColumnType as ParserColumnType, EqualityOp, Expression, Input, Literal,
     LogicalOp, SelectColumns, Terminal as ParserTerm,
@@ -41,8 +41,8 @@ pub enum DatabaseResult {
     Query(QueryResult),
 }
 
-pub fn execute<B: TablePageStoreBuilder>(
-    store_builder: &mut B,
+pub fn execute<M: TablePageStoreManager>(
+    store_manager: &mut M,
     input: Input,
 ) -> Result<DatabaseResult, Error> {
     match input {
@@ -50,28 +50,32 @@ pub fn execute<B: TablePageStoreBuilder>(
             table_name,
             columns,
             primary_key,
-        } => create_table(store_builder, table_name, columns, primary_key),
+        } => create_table(store_manager, table_name, columns, primary_key),
         Input::InsertInto {
             table_name,
             columns,
             values,
-        } => insert_into(store_builder, table_name, columns, values),
+        } => insert_into(store_manager, table_name, columns, values),
         Input::SelectFrom {
             table_name,
             columns,
             where_clause,
-        } => select_from(store_builder, table_name, columns, where_clause),
+        } => select_from(store_manager, table_name, columns, where_clause),
     }
 }
 
-fn create_table<B: TablePageStoreBuilder>(
-    store_builder: &mut B,
+fn create_table<M: TablePageStoreManager>(
+    store_manager: &mut M,
     table_name: &str,
     columns: Vec<ColumnSchema>,
     primary_key: Option<Vec<&str>>,
 ) -> Result<DatabaseResult, Error> {
     let schema = parser_schema_to_table_schema(columns, primary_key)?;
-    Table::create(table_name.to_string(), schema, store_builder)?;
+    Table::create(
+        table_name.to_string(),
+        schema,
+        &mut store_manager.builder(table_name)?,
+    )?;
     Ok(DatabaseResult::Exec(ExecResult { rows_affected: 0 }))
 }
 
@@ -95,13 +99,13 @@ fn parser_schema_to_table_schema(
     Schema::new(columns, primary_key).map_err(Into::into)
 }
 
-fn insert_into<B: TablePageStoreBuilder>(
-    store_builder: &mut B,
+fn insert_into<M: TablePageStoreManager>(
+    store_manager: &mut M,
     table_name: &str,
     columns: Vec<&str>,
     values: Vec<Vec<Literal>>,
 ) -> Result<DatabaseResult, Error> {
-    let mut table = match Table::load(table_name, store_builder)? {
+    let mut table = match Table::load(&mut store_manager.builder(table_name)?)? {
         Some(table) => table,
         None => return Err(Error::NoSuchTable(table_name.to_string())),
     };
@@ -113,13 +117,13 @@ fn insert_into<B: TablePageStoreBuilder>(
     Ok(DatabaseResult::Exec(ExecResult { rows_affected }))
 }
 
-fn select_from<B: TablePageStoreBuilder>(
-    store_builder: &mut B,
+fn select_from<M: TablePageStoreManager>(
+    store_manager: &mut M,
     table_name: &str,
     columns: SelectColumns,
     where_clause: Option<Expression>,
 ) -> Result<DatabaseResult, Error> {
-    let mut table = match Table::load(table_name, store_builder)? {
+    let mut table = match Table::load(&mut store_manager.builder(table_name)?)? {
         Some(table) => table,
         None => return Err(Error::NoSuchTable(table_name.to_string())),
     };
@@ -367,7 +371,7 @@ fn evaluate_equality_op(left: &Column, op: EqualityOp, right: &Column) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::pagestore::{Memory, MemoryBuilder};
+    use crate::pagestore::{Memory, MemoryManager, TablePageStoreBuilder, TablePageStoreManager};
     use crate::row::{RowBytes, RowCol};
 
     // TODO: Test with primary_keys
@@ -454,8 +458,8 @@ mod test {
             None,
         )
         .unwrap();
-        let mut store_builder = MemoryBuilder::new(64 * 1024);
-        let mut data_cache = Cache::new(store_builder.build("test").unwrap());
+        let mut store_builder = MemoryManager::new(64 * 1024).builder("test").unwrap();
+        let mut data_cache = Cache::new(store_builder.build().unwrap());
         let test_row = Row {
             body: vec![
                 RowCol::Int(7),

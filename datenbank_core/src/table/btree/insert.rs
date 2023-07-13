@@ -156,7 +156,7 @@ mod test {
     use super::super::Cache;
     use super::row::RowCol;
     use super::*;
-    use crate::pagestore::{MemoryBuilder, TablePageStoreBuilder};
+    use crate::pagestore::{MemoryManager, TablePageStoreBuilder, TablePageStoreManager};
     use crate::schema::{ColumnType, Schema};
 
     fn assert_node<S: TablePageStore>(node: &Node, node_cache: &mut Cache<S, Node>) {
@@ -167,11 +167,11 @@ mod test {
     #[test]
     fn test_insert_across_split() {
         let schema = Schema::new(vec![("foo".into(), ColumnType::Int)], None).unwrap();
-        let mut store_builder = MemoryBuilder::new(64 * 1024);
         let table_name = "test";
+        let mut store_builder = MemoryManager::new(64 * 1024).builder(&table_name).unwrap();
         let order = 2;
-        let data_cache = Cache::new(store_builder.build(table_name).unwrap());
-        let mut node_cache = Cache::new(store_builder.build(table_name).unwrap());
+        let data_cache = Cache::new(store_builder.build().unwrap());
+        let mut node_cache = Cache::new(store_builder.build().unwrap());
 
         let orig_root_id = node_cache.allocate().unwrap();
         node_cache
@@ -188,7 +188,7 @@ mod test {
             root: Some(orig_root_id),
             node_cache,
             data_cache,
-            store: store_builder.build(table_name).unwrap(),
+            store: store_builder.build().unwrap(),
         };
 
         let to_insert = vec![
@@ -202,7 +202,7 @@ mod test {
 
         let new_root_id = btree.root.unwrap();
         assert!(orig_root_id != new_root_id);
-        let mut node_cache: Cache<_, Node> = Cache::new(store_builder.build(table_name).unwrap());
+        let mut node_cache: Cache<_, Node> = Cache::new(store_builder.build().unwrap());
         assert_node(
             &internal_node(new_root_id, 2, vec![vec![0, 0, 0, 2]], vec![1, 2]),
             &mut node_cache,
@@ -232,7 +232,7 @@ mod test {
         let (count, root_changed) = btree.insert(vec![vec![Column::Int(4)]]).unwrap();
         assert_eq!(1, count);
         assert!(root_changed);
-        let mut node_cache: Cache<_, Node> = Cache::new(store_builder.build(table_name).unwrap());
+        let mut node_cache: Cache<_, Node> = Cache::new(store_builder.build().unwrap());
 
         let next_new_root_id = btree.root.unwrap();
         assert!(new_root_id != next_new_root_id);

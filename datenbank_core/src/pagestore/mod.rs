@@ -1,8 +1,8 @@
 mod file;
 mod memory;
 
-pub use file::{File, FileBuilder};
-pub use memory::{Memory, MemoryBuilder};
+pub use file::{File, FileBuilder, FileManager};
+pub use memory::{Memory, MemoryManager};
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -40,11 +40,20 @@ pub trait TablePageStore: std::fmt::Debug {
     fn delete(&mut self, page_id: usize) -> Result<(), Error>;
 }
 
-// TablePageStoreBuilder is responsible for constructing TablePageStores for a given table.
 pub trait TablePageStoreBuilder: std::fmt::Debug {
-    type TablePageStore: TablePageStore;
+    type PageStore: TablePageStore;
 
     // Build may either create an entirely new instance of a TablePageStore, or return a clone of
     // an already built one.
-    fn build(&mut self, table_name: &str) -> Result<Self::TablePageStore, Error>;
+    fn build(&mut self) -> Result<Self::PageStore, Error>;
+}
+
+// TablePageStoreManager is responsible for constructing TablePageStoreBuilders for a given table.
+pub trait TablePageStoreManager: std::fmt::Debug {
+    type PageStore: TablePageStore;
+    type Builder: TablePageStoreBuilder<PageStore = Self::PageStore>;
+
+    // Builder returns a TablePageStoreBuilder which will repeatedly return a builder for a single
+    // table name.
+    fn builder(&mut self, table_name: &str) -> Result<Self::Builder, Error>;
 }

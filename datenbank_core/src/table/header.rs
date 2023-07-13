@@ -57,7 +57,7 @@ pub fn encode<S: TablePageStore>(name: &str, schema: &Schema, tree: &BTree<S>) -
     header_bytes
 }
 
-pub fn decode<S: TablePageStore, SB: TablePageStoreBuilder<TablePageStore = S>>(
+pub fn decode<S: TablePageStore, SB: TablePageStoreBuilder<PageStore = S>>(
     header_bytes: &[u8],
     store_builder: &mut SB,
 ) -> Result<(String, Schema, BTree<S>), Error> {
@@ -68,9 +68,9 @@ pub fn decode<S: TablePageStore, SB: TablePageStoreBuilder<TablePageStore = S>>(
         order,
         schema: schema.clone(),
         root,
-        node_cache: Cache::new(store_builder.build(&name)?),
-        data_cache: Cache::new(store_builder.build(&name)?),
-        store: store_builder.build(&name)?,
+        node_cache: Cache::new(store_builder.build()?),
+        data_cache: Cache::new(store_builder.build()?),
+        store: store_builder.build()?,
     };
     Ok((name, schema, tree))
 }

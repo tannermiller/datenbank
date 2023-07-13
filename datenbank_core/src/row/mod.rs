@@ -267,7 +267,7 @@ impl<S: TablePageStore> Predicate<S> for AllRows {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::pagestore::{MemoryBuilder, TablePageStoreBuilder};
+    use crate::pagestore::{MemoryManager, TablePageStoreBuilder, TablePageStoreManager};
     use crate::schema::ColumnType;
 
     #[test]
@@ -358,8 +358,8 @@ mod test {
 
     #[test]
     fn test_processed_rows_finalize() {
-        let mut store_builder = MemoryBuilder::new(64);
-        let mut data_cache = Cache::new(store_builder.build("test").unwrap());
+        let mut store_builder = MemoryManager::new(64).builder("test").unwrap();
+        let mut data_cache = Cache::new(store_builder.build().unwrap());
         let base_str = "1".repeat(MAX_INLINE_VAR_LEN_COL_SIZE);
         let base_blob = [1].repeat(MAX_INLINE_VAR_LEN_COL_SIZE);
         let pr = ProcessedRow {
@@ -409,7 +409,7 @@ mod test {
         );
 
         // ensure that the 8 pages were allocated by seeing the next allocated one is 9
-        let mut store = store_builder.build("test").unwrap();
+        let mut store = store_builder.build().unwrap();
         assert_eq!(9, store.allocate().unwrap());
         assert_eq!(
             &vec![1u8, 0, 0, 0, 2, 48, 49, 50],

@@ -3,7 +3,7 @@ use std::fs;
 
 use datenbank_core::api::{
     BTreeError, Column, DatabaseResult, Error, ExecError, ExecResult, ParseError, QueryResult,
-    TableError, TablePageStoreBuilder,
+    TableError, TablePageStoreManager,
 };
 use datenbank_core::Database;
 
@@ -53,22 +53,22 @@ fn query_result(db: DatabaseResult) -> QueryResult {
     }
 }
 
-fn check_query<B: TablePageStoreBuilder>(db: &mut Database<B>, q: &str, exp: Vec<Vec<Column>>) {
+fn check_query<M: TablePageStoreManager>(db: &mut Database<M>, q: &str, exp: Vec<Vec<Column>>) {
     let result = db.exec(q).unwrap();
     assert_eq!(exp, query_result(result).values);
 }
 
-fn check_exec_err<B: TablePageStoreBuilder>(db: &mut Database<B>, q: &str, exp: Error) {
+fn check_exec_err<M: TablePageStoreManager>(db: &mut Database<M>, q: &str, exp: Error) {
     let result = db.exec(q);
     assert_eq!(Err(exp), result);
 }
 
-fn check_exec<B: TablePageStoreBuilder>(db: &mut Database<B>, q: &str, exp_count: usize) {
+fn check_exec<M: TablePageStoreManager>(db: &mut Database<M>, q: &str, exp_count: usize) {
     let result = db.exec(q).unwrap();
     assert_eq!(exp_count, exec_result(result).rows_affected);
 }
 
-fn run_basic_test<B: TablePageStoreBuilder>(mut db: Database<B>, with_primary_key: bool) {
+fn run_basic_test<M: TablePageStoreManager>(mut db: Database<M>, with_primary_key: bool) {
     let create_table = format!(
         r"CREATE TABLE testing {{
     foo INT

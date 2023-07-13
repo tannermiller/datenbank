@@ -5,7 +5,7 @@ use crate::parser::parse;
 
 pub use crate::cache::Error as CacheError;
 pub use crate::exec::{DatabaseResult, Error as ExecError, ExecResult, QueryResult};
-pub use crate::pagestore::{Error as PageError, FileBuilder, MemoryBuilder, TablePageStoreBuilder};
+pub use crate::pagestore::{Error as PageError, FileManager, MemoryManager, TablePageStoreManager};
 pub use crate::parser::Error as ParseError;
 pub use crate::row::Error as RowError;
 pub use crate::schema::{Column, Error as SchemaError};
@@ -24,29 +24,29 @@ pub enum Error {
     Parse(#[from] ParseError),
 }
 
-pub struct Database<B: TablePageStoreBuilder> {
-    builder: B,
+pub struct Database<M: TablePageStoreManager> {
+    manager: M,
 }
 
-impl Database<MemoryBuilder> {
+impl Database<MemoryManager> {
     // Build a database built upon only in-memory storage for the tables.
-    pub fn memory() -> Database<MemoryBuilder> {
+    pub fn memory() -> Database<MemoryManager> {
         Database {
-            builder: MemoryBuilder::new(PAGE_SIZE),
+            manager: MemoryManager::new(PAGE_SIZE),
         }
     }
 
-    pub fn file(path: impl Into<PathBuf>) -> Database<FileBuilder> {
+    pub fn file(path: impl Into<PathBuf>) -> Database<FileManager> {
         Database {
-            builder: FileBuilder::new(path, PAGE_SIZE as u32),
+            manager: FileManager::new(path, PAGE_SIZE as u32),
         }
     }
 }
 
-impl<B: TablePageStoreBuilder> Database<B> {
+impl<M: TablePageStoreManager> Database<M> {
     // Execute the provided SQL string against the database.
     pub fn exec(&mut self, input: &str) -> Result<DatabaseResult, Error> {
         let input = parse(input)?;
-        execute(&mut self.builder, input).map_err(Into::into)
+        execute(&mut self.manager, input).map_err(Into::into)
     }
 }

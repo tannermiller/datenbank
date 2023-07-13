@@ -40,7 +40,7 @@ pub struct Table<S: TablePageStore> {
 
 impl<S: TablePageStore> Table<S> {
     // Create a new table, which is expected not to exist yet.
-    pub fn create<SB: TablePageStoreBuilder<TablePageStore = S>>(
+    pub fn create<SB: TablePageStoreBuilder<PageStore = S>>(
         name: String,
         schema: Schema,
         store_builder: &mut SB,
@@ -49,7 +49,7 @@ impl<S: TablePageStore> Table<S> {
             return Err(Error::NameTooLong);
         }
 
-        let mut store = store_builder.build(&name)?;
+        let mut store = store_builder.build()?;
 
         let tree = BTree::new(name.clone(), schema.clone(), store_builder)?;
         store.put(0, header::encode(&name, &schema, &tree))?;
@@ -63,11 +63,10 @@ impl<S: TablePageStore> Table<S> {
     }
 
     // Load an extant table.
-    pub fn load<SB: TablePageStoreBuilder<TablePageStore = S>>(
-        name: &str,
+    pub fn load<SB: TablePageStoreBuilder<PageStore = S>>(
         store_builder: &mut SB,
     ) -> Result<Option<Table<S>>, Error> {
-        let mut store = store_builder.build(name)?;
+        let mut store = store_builder.build()?;
         let header_page = store.get(0)?;
         if header_page.is_empty() {
             return Ok(None);
@@ -122,7 +121,7 @@ mod test {
     use super::btree::node::encode::decode_node;
     use super::btree::node::NodeBody;
     use super::*;
-    use crate::pagestore::MemoryBuilder;
+    use crate::pagestore::{MemoryManager, TablePageStoreBuilder, TablePageStoreManager};
     use crate::row::AllRows;
     use crate::schema::{ColumnType, Schema};
 
@@ -138,7 +137,11 @@ mod test {
             None,
         )
         .unwrap();
-        let mut store_builder = MemoryBuilder::new(1024 * 64);
+        let mut store_builder = MemoryManager::new(1024 * 64).builder(&name).unwrap();
+
+        let load_result = Table::load(&mut store_builder);
+        assert!(load_result.is_ok());
+        assert!(load_result.unwrap().is_none());
 
         {
             let table = Table::create(name.clone(), schema.clone(), &mut store_builder).unwrap();
@@ -146,7 +149,7 @@ mod test {
             assert_eq!(&name, &table.name);
             assert_eq!(&schema, &table.schema);
 
-            let mut store = store_builder.build(&name).unwrap();
+            let mut store = store_builder.build().unwrap();
             let table_header_page = store.get(0).unwrap();
             assert_eq!(
                 vec![
@@ -166,11 +169,7 @@ mod test {
             assert_eq!(table.tree.root, decoded_btree.root);
         }
 
-        let load_result = Table::load("not_found", &mut store_builder);
-        assert!(load_result.is_ok());
-        assert!(load_result.unwrap().is_none());
-
-        let loaded_table = Table::load(&name, &mut store_builder).unwrap().unwrap();
+        let loaded_table = Table::load(&mut store_builder).unwrap().unwrap();
         assert_eq!(name, loaded_table.name);
         assert_eq!(schema, loaded_table.schema);
     }
@@ -187,7 +186,7 @@ mod test {
             None,
         )
         .unwrap();
-        let mut store_builder = MemoryBuilder::new(1024 * 64);
+        let mut store_builder = MemoryManager::new(1024 * 64).builder(&name).unwrap();
 
         let mut table = Table::create(name.clone(), schema.clone(), &mut store_builder).unwrap();
 
@@ -203,7 +202,7 @@ mod test {
             .unwrap();
         assert_eq!(1, rows_affected);
 
-        let mut store = store_builder.build(&name).unwrap();
+        let mut store = store_builder.build().unwrap();
         let root_id = {
             let table_header_page = store.get(0).unwrap();
             let (_, _, decoded_btree) =
@@ -235,7 +234,7 @@ mod test {
             None,
         )
         .unwrap();
-        let mut store_builder = MemoryBuilder::new(1024 * 16);
+        let mut store_builder = MemoryManager::new(1024 * 16).builder(&name).unwrap();
         let mut table = Table::create(name.clone(), schema.clone(), &mut store_builder).unwrap();
 
         let big_num = 10_000;
@@ -252,7 +251,7 @@ mod test {
 
         assert_eq!(big_num, rows_affected);
 
-        let mut store = store_builder.build(&name).unwrap();
+        let mut store = store_builder.build().unwrap();
         let root_id = {
             let table_header_page = store.get(0).unwrap();
             let (_, _, decoded_btree) =
