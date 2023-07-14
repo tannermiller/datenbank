@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
-use crate::row::{Error as RowError, Predicate};
+use crate::row::{Error as RowError, Predicate, Row, RowBytes, RowCol};
 use crate::schema::{Column, Error as SchemaError, Schema};
 use btree::{BTree, Error as BTreeError};
 
@@ -104,7 +105,21 @@ impl<S: TablePageStore> Table<S> {
         // every column is present in our inserted columns.
         let values_in_order = self.schema.put_columns_in_order(columns, values)?;
 
-        let (rows_affected, root_updated) = self.primary.insert(values_in_order)?;
+        let (inserted_rows, mut root_updated) = self.primary.insert(values_in_order)?;
+
+        let col_index_lookup: HashMap<&Rc<String>, usize> = self
+            .schema
+            .columns()
+            .iter()
+            .enumerate()
+            .map(|(i, (col_name, _))| (col_name, i))
+            .collect();
+
+        for secondary in &mut self.secondaries {
+            let secondary_root_updated =
+                insert_secondary(secondary, &self.schema, &col_index_lookup, &inserted_rows)?;
+            root_updated = root_updated || secondary_root_updated;
+        }
 
         if root_updated {
             self.store.put(
@@ -113,7 +128,7 @@ impl<S: TablePageStore> Table<S> {
             )?;
         }
 
-        Ok(rows_affected)
+        Ok(inserted_rows.len())
     }
 
     // Scan the entire table for and return the values for every row for the provided columns.
@@ -130,12 +145,52 @@ impl<S: TablePageStore> Table<S> {
     }
 }
 
+fn insert_secondary<S: TablePageStore>(
+    secondary: &mut BTree<S>,
+    schema: &Schema,
+    col_index_lookup: &HashMap<&Rc<String>, usize>,
+    inserted_rows: &[Row],
+) -> Result<bool, Error> {
+    let mut index_rows = Vec::with_capacity(inserted_rows.len());
+    for row in inserted_rows {
+        let index_row = secondary
+            .schema
+            .columns()
+            .iter()
+            .map(|(col_name, _)| {
+                if **col_name == "key" {
+                    Column::LongBlob(row.key(&schema))
+                } else {
+                    let i = col_index_lookup.get(col_name).unwrap();
+                    match row.body[*i] {
+                        RowCol::Int(col_int) => Column::Int(col_int),
+                        RowCol::Bool(b) => Column::Bool(b),
+                        RowCol::VarChar(RowBytes { ref inline, .. }) => Column::VarChar(
+                            String::from_utf8(inline.clone())
+                                .expect("stored bytes are valid string"),
+                        ),
+                        RowCol::LongBlob(RowBytes { ref inline, .. }) => {
+                            Column::LongBlob(inline.clone())
+                        }
+                    }
+                }
+            })
+            .collect();
+        index_rows.push(index_row);
+    }
+
+    secondary
+        .insert(index_rows)
+        .map(|(_, root_updated)| root_updated)
+        .map_err(Into::into)
+}
+
 #[cfg(test)]
 mod test {
     use super::btree::node::encode::decode_node;
     use super::btree::node::NodeBody;
     use super::*;
-    use crate::pagestore::{MemoryManager, TablePageStoreBuilder, TablePageStoreManager};
+    use crate::pagestore::{Memory, MemoryManager, TablePageStoreBuilder, TablePageStoreManager};
     use crate::row::AllRows;
     use crate::schema::{ColumnType, Schema};
 
@@ -178,7 +233,7 @@ mod test {
                     117, 103, 97, 114, 0, 5, 115, 112, 105, 99, 101, 0, 5, 101, 118, 95, 115, 112,
                     0, 2, 0, 15, 101, 118, 101, 114, 121, 116, 104, 105, 110, 103, 95, 110, 105,
                     99, 101, 0, 5, 115, 112, 105, 99, 101, 0, 8, 0, 0, 7, 255, 0, 0, 0, 0, 0, 2, 0,
-                    8, 0, 0, 0, 119, 0, 0, 0, 0, 0, 8, 0, 0, 0, 119, 0, 0, 0, 0
+                    8, 0, 0, 1, 141, 0, 0, 0, 0, 0, 8, 0, 0, 1, 148, 0, 0, 0, 0
                 ],
                 table_header_page
             );
@@ -202,7 +257,7 @@ mod test {
     }
 
     #[test]
-    fn test_insert() {
+    fn test_insert_no_indices() {
         let name = "inserting_is_awesome".to_string();
         let schema = Schema::new(
             vec![
@@ -238,18 +293,115 @@ mod test {
             decoded_btree.root.unwrap()
         };
 
-        let root_node_bytes = store.get(root_id).unwrap();
-        let root_node = decode_node(&root_node_bytes).unwrap();
+        load_root_leaf_and_check_rows(
+            &mut store,
+            root_id,
+            vec![vec![
+                RowCol::Int(7),
+                RowCol::VarChar(RowBytes {
+                    inline: vec![b'h', b'o', b'l', b'a'],
+                    next_page: None,
+                }),
+                RowCol::Bool(false),
+            ]],
+        );
+    }
+
+    fn load_root_leaf_and_check_rows(store: &mut Memory, root: usize, exp_rows: Vec<Vec<RowCol>>) {
+        let index_node_bytes = store.get(root).unwrap();
+        let root_node = decode_node(&index_node_bytes).unwrap();
         let leaf = match root_node.body {
-            NodeBody::Internal(_) => panic!("got internal root node"),
+            NodeBody::Internal(_) => panic!("got internal secondary root node"),
             NodeBody::Leaf(l) => l,
         };
 
         assert!(leaf.right_sibling.is_none());
-        assert_eq!(1, leaf.rows.len());
-        assert_eq!(3, leaf.rows[0].body.len());
+        assert_eq!(exp_rows.len(), leaf.rows.len());
+        for (exp_row, row) in exp_rows.iter().zip(leaf.rows.iter()) {
+            assert_eq!(exp_row.len(), row.body.len());
+            assert_eq!(exp_row, &row.body);
+        }
     }
 
+    #[test]
+    fn test_insert_with_indices() {
+        let name = "inserting_is_awesome".to_string();
+        let schema = Schema::new(
+            vec![
+                ("zero".into(), ColumnType::Int),
+                ("one".into(), ColumnType::VarChar(10)),
+                ("infinity".into(), ColumnType::Bool),
+            ],
+            None,
+            vec![
+                ("idx_one_zero", vec!["one", "zero"]),
+                ("idx_zero_infinity", vec!["zero", "infinity"]),
+            ],
+        )
+        .unwrap();
+
+        let mut store_builder = MemoryManager::new(1024 * 64).builder(&name).unwrap();
+
+        let mut table = Table::create(name.clone(), schema.clone(), &mut store_builder).unwrap();
+
+        let rows_affected = table
+            .insert(
+                &["zero", "one", "infinity"],
+                vec![vec![
+                    Column::Int(7),
+                    Column::VarChar("hola".to_string()),
+                    Column::Bool(false),
+                ]],
+            )
+            .unwrap();
+        assert_eq!(1, rows_affected);
+
+        let mut store = store_builder.build().unwrap();
+        let table_header_page = store.get(0).unwrap();
+        let (_, _, primary, secondaries) =
+            header::decode(&table_header_page, &mut store_builder).unwrap();
+
+        load_root_leaf_and_check_rows(
+            &mut store,
+            primary.root.unwrap(),
+            vec![vec![
+                RowCol::Int(7),
+                RowCol::VarChar(RowBytes {
+                    inline: b"hola".to_vec(),
+                    next_page: None,
+                }),
+                RowCol::Bool(false),
+            ]],
+        );
+
+        let secondary_rows = vec![
+            vec![vec![
+                RowCol::VarChar(RowBytes {
+                    inline: b"hola".to_vec(),
+                    next_page: None,
+                }),
+                RowCol::Int(7),
+                RowCol::LongBlob(RowBytes {
+                    inline: vec![0, 0, 0, 7, b'_', b'h', b'o', b'l', b'a', b'_', 0],
+                    next_page: None,
+                }),
+            ]],
+            vec![vec![
+                RowCol::Int(7),
+                RowCol::Bool(false),
+                RowCol::LongBlob(RowBytes {
+                    inline: vec![0, 0, 0, 7, b'_', b'h', b'o', b'l', b'a', b'_', 0],
+                    next_page: None,
+                }),
+            ]],
+        ];
+
+        for (secondary, exp_rows) in secondaries.iter().zip(secondary_rows.into_iter()) {
+            load_root_leaf_and_check_rows(&mut store, secondary.root.unwrap(), exp_rows);
+        }
+    }
+
+    // TODO: This big test to should be moved to the integration tests.
     #[test]
     fn test_big_table() {
         let name = "big_inserts".to_string();

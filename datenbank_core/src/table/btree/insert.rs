@@ -8,7 +8,7 @@ impl<S: TablePageStore> BTree<S> {
     // Insert the row according to the key specificed by the btree schema. Returns the number of
     // rows affected. We currently only allow inserting fully specified rows so these must already
     // be put in order via schema.put_columns_in_order().
-    pub fn insert(&mut self, values: Vec<Vec<Column>>) -> Result<(usize, bool), Error> {
+    pub fn insert(&mut self, values: Vec<Vec<Column>>) -> Result<(Vec<Row>, bool), Error> {
         let mut changed_root = false;
 
         // first of all, handle an empty tree.
@@ -26,12 +26,16 @@ impl<S: TablePageStore> BTree<S> {
             Some(root_id) => root_id,
         };
 
-        let mut count_affected = 0;
+        let mut inserted_rows = Vec::with_capacity(values.len());
         for value in values {
             // process the row to ensure it will fit in the leaf node, and split out any overflow
             // and store those in the data cache.
             let row = row::process_columns(self.store.usable_page_size(), value)?
                 .finalize(&mut self.data_cache)?;
+
+            // TODO: Can I make the rows Rc's so I can both insert and return it?
+            //       This clone is not ideal.
+            inserted_rows.push(row.clone());
 
             if let Some(new_root_id) = self.insert_row(root_id, row)? {
                 // if we split the root node then we need set the root id for the next iteration to
@@ -40,8 +44,6 @@ impl<S: TablePageStore> BTree<S> {
                 changed_root = true;
                 self.root = Some(root_id);
             }
-
-            count_affected += 1;
         }
 
         // TODO: Should this commit be here, at the tree level? or should it be at the table level?
@@ -51,7 +53,7 @@ impl<S: TablePageStore> BTree<S> {
         // we're writing the table header up a level, so we should probably write there too
         self.commit()?;
 
-        Ok((count_affected, changed_root))
+        Ok((inserted_rows, changed_root))
     }
 
     fn insert_row(&mut self, root_id: usize, row: Row) -> Result<Option<usize>, Error> {
@@ -196,8 +198,8 @@ mod test {
             vec![Column::Int(2)],
             vec![Column::Int(3)],
         ];
-        let (count, root_changed) = btree.insert(to_insert).unwrap();
-        assert_eq!(3, count);
+        let (inserted, root_changed) = btree.insert(to_insert).unwrap();
+        assert_eq!(3, inserted.len());
         assert!(root_changed);
 
         let new_root_id = btree.root.unwrap();
@@ -229,8 +231,8 @@ mod test {
             &mut node_cache,
         );
 
-        let (count, root_changed) = btree.insert(vec![vec![Column::Int(4)]]).unwrap();
-        assert_eq!(1, count);
+        let (inserted, root_changed) = btree.insert(vec![vec![Column::Int(4)]]).unwrap();
+        assert_eq!(1, inserted.len());
         assert!(root_changed);
         let mut node_cache: Cache<_, Node> = Cache::new(store_builder.build().unwrap());
 

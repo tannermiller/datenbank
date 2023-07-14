@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::key::MAX_KEY_VAR_CHAR_LEN;
 use crate::parser::{Literal, SelectColumns};
 
 mod encode;
@@ -382,8 +383,14 @@ impl Schema {
                             (*column_lookup.get(col_name).unwrap()).clone(),
                         )
                     })
-                    // add one more column which is the key into the primary btree for this row
-                    .chain(vec![("key".to_string().into(), ColumnType::VarChar(1000))].into_iter())
+                    .chain(
+                        // add one more column which is the key into the primary btree for this row
+                        vec![(
+                            "key".to_string().into(),
+                            ColumnType::LongBlob(MAX_KEY_VAR_CHAR_LEN as u32),
+                        )]
+                        .into_iter(),
+                    )
                     .collect();
 
                 (
@@ -737,7 +744,10 @@ mod test {
                         columns: vec![
                             ("foo".to_string().into(), ColumnType::Int),
                             ("bar".to_string().into(), ColumnType::Bool),
-                            ("key".to_string().into(), ColumnType::VarChar(1000))
+                            (
+                                "key".to_string().into(),
+                                ColumnType::LongBlob(MAX_KEY_VAR_CHAR_LEN as u32)
+                            )
                         ],
                         primary_key: Some(PrimaryKey {
                             column_names: vec!["foo".to_string().into(), "bar".to_string().into()],
@@ -752,7 +762,10 @@ mod test {
                         columns: vec![
                             ("qux".to_string().into(), ColumnType::VarChar(10)),
                             ("foo".to_string().into(), ColumnType::Int),
-                            ("key".to_string().into(), ColumnType::VarChar(1000))
+                            (
+                                "key".to_string().into(),
+                                ColumnType::LongBlob(MAX_KEY_VAR_CHAR_LEN as u32)
+                            )
                         ],
                         primary_key: Some(PrimaryKey {
                             column_names: vec!["qux".to_string().into(), "foo".to_string().into()],
@@ -767,7 +780,10 @@ mod test {
                         columns: vec![
                             ("bar".to_string().into(), ColumnType::Bool),
                             ("qux".to_string().into(), ColumnType::VarChar(10)),
-                            ("key".to_string().into(), ColumnType::VarChar(1000))
+                            (
+                                "key".to_string().into(),
+                                ColumnType::LongBlob(MAX_KEY_VAR_CHAR_LEN as u32)
+                            )
                         ],
                         primary_key: Some(PrimaryKey {
                             column_names: vec!["bar".to_string().into(), "qux".to_string().into()],

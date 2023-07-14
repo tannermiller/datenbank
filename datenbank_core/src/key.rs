@@ -2,7 +2,7 @@ use crate::parser::Literal;
 use crate::row::RowCol;
 
 // the max amount of a varchar that is used in the key
-const MAX_KEY_VAR_CHAR_LEN: usize = 128;
+pub const MAX_KEY_VAR_CHAR_LEN: usize = 128;
 
 pub trait KeyPart {
     fn to_key_part(&self, key: &mut Vec<u8>);

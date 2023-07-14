@@ -17,15 +17,9 @@ pub fn encode<S: TablePageStore>(tree: &BTree<S>) -> Vec<u8> {
     bytes
         .write_all(&(tree.order as u32).to_be_bytes())
         .expect("can't fail writing to vec");
-    if let Some(root) = &tree.root {
-        bytes
-            .write_all(&(*root as u32).to_be_bytes())
-            .expect("can't fail writing to vec");
-    } else {
-        bytes
-            .write_all(&0u32.to_be_bytes())
-            .expect("can't fail writing to vec");
-    }
+    bytes
+        .write_all(&(tree.root.unwrap_or_else(|| 0) as u32).to_be_bytes())
+        .expect("can't fail writing to vec");
     bytes
 }
 

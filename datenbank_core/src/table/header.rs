@@ -90,9 +90,9 @@ pub fn decode<S: TablePageStore, SB: TablePageStoreBuilder<PageStore = S>>(
                 order,
                 schema,
                 root,
-                node_cache: Cache::new(store_builder.build(&name)?),
-                data_cache: Cache::new(store_builder.build(&name)?),
-                store: store_builder.build(&name)?,
+                node_cache: Cache::new(store_builder.build()?),
+                data_cache: Cache::new(store_builder.build()?),
+                store: store_builder.build()?,
             })
         })
         .collect::<Result<Vec<BTree<S>>, Error>>()?;
