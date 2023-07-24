@@ -129,7 +129,7 @@ fn select_from<M: TablePageStoreManager>(
     store_manager: &mut M,
     table_name: &str,
     columns: SelectColumns,
-    where_clause: Option<Expression>,
+    where_clause_expr: Option<Expression>,
 ) -> Result<DatabaseResult, Error> {
     let mut table = match Table::load(&mut store_manager.builder(table_name)?)? {
         Some(table) => table,
@@ -138,27 +138,48 @@ fn select_from<M: TablePageStoreManager>(
 
     let expanded_columns = table.schema().expand_select_columns(columns)?;
 
-    let values = match where_clause {
-        Some(wc) => {
-            // We will either:
-            //   1) look for a complete set of key fields connected by AND, these don't need to be
-            //      in key order, as long as there is no OR b/w them
-            //   2) synthesize the Expression into a form that implements Predicate and pass
-            //      that into Table::scan()
-
-            let processed = process_expression(wc)?;
-            match is_key_lookup(table.schema(), &processed) {
-                Some(key) => match table.lookup(&key)? {
-                    Some(res) => vec![res],
-                    None => vec![],
-                },
-                None => table.scan(expanded_columns, processed)?,
-            }
-        }
-        None => table.scan(expanded_columns, AllRows)?,
+    let values = match where_clause_expr {
+        Some(expr) => where_clause(&mut table, expr, expanded_columns)?,
+        None => Some(table.scan(expanded_columns, AllRows)?),
     };
 
-    Ok(DatabaseResult::Query(QueryResult { values }))
+    Ok(DatabaseResult::Query(QueryResult {
+        values: values.unwrap_or_else(|| Vec::new()),
+    }))
+}
+
+fn where_clause<S: TablePageStore>(
+    table: &mut Table<S>,
+    expr: Expression,
+    expanded_columns: Vec<Rc<String>>,
+) -> Result<Option<Vec<Vec<Column>>>, Error> {
+    // We will either:
+    //   1) look for a complete set of key fields connected by AND, these don't need to be
+    //      in key order, as long as there is no OR b/w them
+    //   2) synthesize the Expression into a form that implements Predicate and pass
+    //      that into Table::scan()
+
+    let processed = process_expression(expr)?;
+
+    let name_key = table
+        .schemas()
+        .iter()
+        .fold(None, |found, (name, schema)| match found {
+            Some(found) => Some(found),
+            None => is_key_lookup(schema, &processed).map(|key| (name.clone(), key)),
+        });
+
+    if let Some((name, key)) = name_key {
+        match table.lookup_via_index(&name, &key) {
+            Ok(res) => Ok(res.map(|r| vec![r])),
+            Err(err) => Err(err.into()),
+        }
+    } else {
+        match table.scan(expanded_columns, processed) {
+            Ok(res) => Ok(Some(res)),
+            Err(err) => Err(err.into()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

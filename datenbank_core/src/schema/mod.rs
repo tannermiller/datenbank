@@ -54,7 +54,7 @@ impl PrimaryKey {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Index {
-    name: String,
+    name: Rc<String>,
     columns: Vec<Rc<String>>,
 }
 
@@ -111,7 +111,7 @@ impl Schema {
                     })
                     .collect::<Result<Vec<Rc<String>>, Error>>()?;
                 Ok(Index {
-                    name: name.into(),
+                    name: name.to_string().into(),
                     columns,
                 })
             })
@@ -358,7 +358,7 @@ impl Schema {
     // own Schema which contains the index field columns plus an additional key column which
     // contains the actual primary row key into the primary btree. This method generates those
     // secondary btree schemas from the primary schema.
-    pub fn index_schemas(&self) -> Vec<(String, Schema)> {
+    pub fn index_schemas(&self) -> Vec<(Rc<String>, Schema)> {
         let column_lookup: HashMap<&Rc<String>, &ColumnType> = self
             .columns
             .iter()
@@ -739,7 +739,7 @@ mod test {
         assert_eq!(
             vec![
                 (
-                    "fb".into(),
+                    "fb".to_string().into(),
                     Schema {
                         columns: vec![
                             ("foo".to_string().into(), ColumnType::Int),
@@ -757,7 +757,7 @@ mod test {
                     }
                 ),
                 (
-                    "qf".into(),
+                    "qf".to_string().into(),
                     Schema {
                         columns: vec![
                             ("qux".to_string().into(), ColumnType::VarChar(10)),
@@ -775,7 +775,7 @@ mod test {
                     }
                 ),
                 (
-                    "bq".into(),
+                    "bq".to_string().into(),
                     Schema {
                         columns: vec![
                             ("bar".to_string().into(), ColumnType::Bool),

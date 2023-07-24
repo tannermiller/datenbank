@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::rc::Rc;
 
 use nom::error::{make_error, ErrorKind};
 use nom::multi::{length_count, length_value};
@@ -66,9 +67,10 @@ pub fn encode<S: TablePageStore>(
 pub fn decode<S: TablePageStore, SB: TablePageStoreBuilder<PageStore = S>>(
     header_bytes: &[u8],
     store_builder: &mut SB,
-) -> Result<(String, Schema, BTree<S>, Vec<BTree<S>>), Error> {
+) -> Result<(Rc<String>, Schema, BTree<S>, Vec<BTree<S>>), Error> {
     let (_, (name, schema, order, root, secondaries)) =
         decode_parse(header_bytes).map_err(|e| Error::DecodingError(e.to_string()))?;
+    let name = Rc::new(name);
 
     let tree = BTree {
         name: name.clone(),

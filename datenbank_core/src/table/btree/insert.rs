@@ -184,7 +184,7 @@ mod test {
             .unwrap();
 
         let mut btree = BTree {
-            name: table_name.to_string(),
+            name: table_name.to_string().into(),
             schema,
             order,
             root: Some(orig_root_id),

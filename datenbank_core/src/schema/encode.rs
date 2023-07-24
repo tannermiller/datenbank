@@ -103,7 +103,7 @@ pub fn decode(input: &[u8]) -> IResult<&[u8], Schema> {
     let mut indices = Vec::with_capacity(indices_bytes.len());
     for (idx_name, idx_cols) in indices_bytes {
         let name = match String::from_utf8(idx_name.to_vec()) {
-            Ok(name) => name,
+            Ok(name) => name.into(),
             Err(_) => return Err(NomErr::Failure(make_error(input, ErrorKind::Verify))),
         };
 

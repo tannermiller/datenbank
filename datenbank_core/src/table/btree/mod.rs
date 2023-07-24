@@ -30,7 +30,7 @@ pub enum Error {
 #[derive(Debug)]
 pub struct BTree<S: TablePageStore> {
     // the name of this tree, often its the table or index name
-    pub(crate) name: String,
+    pub(crate) name: Rc<String>,
     pub(crate) schema: Schema,
     // the order or branching factor of the B+ Tree
     pub(crate) order: usize,
@@ -43,7 +43,7 @@ pub struct BTree<S: TablePageStore> {
 impl<S: TablePageStore> BTree<S> {
     // Build a brand new btree with no data in it.
     pub fn new<SB: TablePageStoreBuilder<PageStore = S>>(
-        name: String,
+        name: Rc<String>,
         schema: Schema,
         store_builder: &mut SB,
     ) -> Result<BTree<S>, Error> {
@@ -246,7 +246,7 @@ mod test {
             .unwrap();
 
         let mut btree = BTree {
-            name: "test".to_string(),
+            name: "test".to_string().into(),
             schema,
             order: 10,
             root: Some(root_id),
@@ -312,7 +312,7 @@ mod test {
             .unwrap();
 
         let mut btree = BTree {
-            name: "test".to_string(),
+            name: "test".to_string().into(),
             schema,
             order: 10,
             root: Some(root_id),

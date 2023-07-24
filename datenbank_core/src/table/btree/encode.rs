@@ -43,7 +43,7 @@ mod test {
     fn test_encode() {
         let mut store_builder = MemoryManager::new(64 * 1024).builder("something").unwrap();
         let empty_tree = BTree {
-            name: "something".to_string(),
+            name: "something".to_string().into(),
             schema: Schema::new(vec![], None, vec![]).unwrap(),
             order: 1000,
             root: None,
@@ -54,7 +54,7 @@ mod test {
         assert_eq!(vec![0, 0, 3, 232, 0, 0, 0, 0], encode(&empty_tree));
 
         let filled_tree = BTree {
-            name: "something".to_string(),
+            name: "something".to_string().into(),
             schema: Schema::new(vec![], None, vec![]).unwrap(),
             order: 1000,
             root: Some(7),

@@ -33,7 +33,7 @@ pub enum Error {
 // data. It manages the table btree, any indices as well as the persistence of the table.
 #[derive(Debug)]
 pub struct Table<S: TablePageStore> {
-    name: String,
+    name: Rc<String>,
     schema: Schema,
     store: S,
     primary: BTree<S>,
@@ -50,6 +50,7 @@ impl<S: TablePageStore> Table<S> {
         if name.len() > 255 {
             return Err(Error::NameTooLong);
         }
+        let name = Rc::new(name);
 
         let mut store = store_builder.build()?;
 
@@ -87,7 +88,7 @@ impl<S: TablePageStore> Table<S> {
         let (name, schema, primary, secondaries) = header::decode(&header_page, store_builder)?;
 
         Ok(Some(Table {
-            name,
+            name: name.into(),
             schema,
             store,
             primary,
@@ -97,6 +98,13 @@ impl<S: TablePageStore> Table<S> {
 
     pub fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    pub fn schemas(&self) -> Vec<(Rc<String>, &Schema)> {
+        let mut schemas = Vec::with_capacity(self.secondaries.len() + 1);
+        schemas.push((self.name.clone(), &self.schema));
+        schemas.extend(self.secondaries.iter().map(|s| (s.name.clone(), &s.schema)));
+        schemas
     }
 
     // Insert the values into the specified columns. Returns the number of rows updated.
@@ -142,6 +150,23 @@ impl<S: TablePageStore> Table<S> {
 
     pub fn lookup(&mut self, key: &Vec<u8>) -> Result<Option<Vec<Column>>, Error> {
         self.primary.lookup(key).map_err(Into::into)
+    }
+
+    pub fn lookup_via_index(
+        &mut self,
+        name: &Rc<String>,
+        key: &Vec<u8>,
+    ) -> Result<Option<Vec<Column>>, Error> {
+        if name == &self.name {
+            return self.lookup(key);
+        }
+
+        for secondary in &mut self.secondaries {
+            if &secondary.name == name {
+                return secondary.lookup(key).map_err(Into::into);
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -219,7 +244,7 @@ mod test {
         {
             let table = Table::create(name.clone(), schema.clone(), &mut store_builder).unwrap();
 
-            assert_eq!(&name, &table.name);
+            assert_eq!(&name, &*table.name);
             assert_eq!(&schema, &table.schema);
 
             let mut store = store_builder.build().unwrap();
@@ -240,7 +265,7 @@ mod test {
 
             let (decoded_name, decoded_schema, decoded_btree, decoded_secondaries) =
                 header::decode(&table_header_page, &mut store_builder).unwrap();
-            assert_eq!(name, decoded_name);
+            assert_eq!(name, *decoded_name);
             assert_eq!(schema, decoded_schema);
             assert_eq!(table.primary.order, decoded_btree.order);
             assert_eq!(table.primary.root, decoded_btree.root);
@@ -252,7 +277,7 @@ mod test {
         }
 
         let loaded_table = Table::load(&mut store_builder).unwrap().unwrap();
-        assert_eq!(name, loaded_table.name);
+        assert_eq!(name, *loaded_table.name);
         assert_eq!(schema, loaded_table.schema);
     }
 
