@@ -162,10 +162,19 @@ impl<S: TablePageStore> Table<S> {
         }
 
         for secondary in &mut self.secondaries {
-            if &secondary.name == name {
-                return secondary.lookup(key).map_err(Into::into);
+            if &secondary.name != name {
+                continue;
+            }
+
+            let pk = secondary
+                .lookup(key)?
+                .and_then(|key_row| key_row.into_iter().last());
+
+            if let Some(Column::LongBlob(pk)) = pk {
+                return self.lookup(&pk);
             }
         }
+
         Ok(None)
     }
 }
@@ -495,5 +504,100 @@ mod test {
             assert_eq!(Column::VarChar((i % 10).to_string().repeat(100)), vs[1]);
             assert_eq!(Column::Bool(i % 2 == 0), vs[2]);
         }
+    }
+
+    #[test]
+    fn test_lookup_via_index() {
+        let name = "index_lookup_GOOOOOO".to_string();
+        let schema = Schema::new(
+            vec![
+                ("im".into(), ColumnType::Int),
+                ("so".into(), ColumnType::Int),
+                ("very".into(), ColumnType::Bool),
+                ("cool".into(), ColumnType::Int),
+            ],
+            Some(vec!["im", "so"]),
+            vec![
+                ("idx_so_im", vec!["so", "im"]),
+                ("idx_very_so", vec!["very", "so"]),
+            ],
+        )
+        .unwrap();
+
+        let mut store_builder = MemoryManager::new(1024 * 64).builder(&name).unwrap();
+
+        let mut table = Table::create(name.clone(), schema.clone(), &mut store_builder).unwrap();
+
+        let rows_affected = table
+            .insert(
+                &["im", "so", "very", "cool"],
+                vec![
+                    vec![
+                        Column::Int(1),
+                        Column::Int(2),
+                        Column::Bool(false),
+                        Column::Int(3),
+                    ],
+                    vec![
+                        Column::Int(4),
+                        Column::Int(5),
+                        Column::Bool(false),
+                        Column::Int(6),
+                    ],
+                    vec![
+                        Column::Int(7),
+                        Column::Int(8),
+                        Column::Bool(false),
+                        Column::Int(9),
+                    ],
+                ],
+            )
+            .unwrap();
+        assert_eq!(3, rows_affected);
+
+        assert_eq!(
+            vec![
+                Column::Int(1),
+                Column::Int(2),
+                Column::Bool(false),
+                Column::Int(3),
+            ],
+            table
+                .lookup_via_index(&Rc::new(name), &vec![0, 0, 0, 1, b'_', 0, 0, 0, 2])
+                .unwrap()
+                .unwrap()
+        );
+
+        assert_eq!(
+            vec![
+                Column::Int(4),
+                Column::Int(5),
+                Column::Bool(false),
+                Column::Int(6),
+            ],
+            table
+                .lookup_via_index(
+                    &Rc::new("idx_so_im".to_string()),
+                    &vec![0, 0, 0, 5, b'_', 0, 0, 0, 4]
+                )
+                .unwrap()
+                .unwrap()
+        );
+
+        assert_eq!(
+            vec![
+                Column::Int(7),
+                Column::Int(8),
+                Column::Bool(false),
+                Column::Int(9),
+            ],
+            table
+                .lookup_via_index(
+                    &Rc::new("idx_very_so".to_string()),
+                    &vec![0, b'_', 0, 0, 0, 8]
+                )
+                .unwrap()
+                .unwrap()
+        );
     }
 }

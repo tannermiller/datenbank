@@ -170,6 +170,8 @@ fn where_clause<S: TablePageStore>(
         });
 
     if let Some((name, key)) = name_key {
+        // TODO: Are we returning all the columns when we should only be returning some for
+        // lookups?
         match table.lookup_via_index(&name, &key) {
             Ok(res) => Ok(res.map(|r| vec![r])),
             Err(err) => Err(err.into()),
@@ -402,8 +404,6 @@ mod test {
     use super::*;
     use crate::pagestore::{Memory, MemoryManager, TablePageStoreBuilder, TablePageStoreManager};
     use crate::row::{RowBytes, RowCol};
-
-    // TODO: Test with primary_keys
 
     #[test]
     fn test_process_expressions() {
