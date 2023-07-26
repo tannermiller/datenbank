@@ -441,7 +441,6 @@ mod test {
         }
     }
 
-    // TODO: This big test to should be moved to the integration tests.
     #[test]
     fn test_big_table() {
         let name = "big_inserts".to_string();

@@ -354,3 +354,54 @@ fn run_index_test<M: TablePageStoreManager>(mut db: Database<M>) {
         vec![vec![Column::LongBlob(b"up".to_vec())]],
     );
 }
+
+#[test]
+fn test_big_table_memory_integration() {
+    let db = Database::memory();
+    run_big_table_test(db);
+}
+
+#[test]
+fn test_big_table_file_integration() {
+    let temp_dir = env::temp_dir().join("big_table_file_integration_test");
+    let _ = fs::remove_dir_all(&temp_dir);
+    let _ = fs::create_dir(&temp_dir);
+    let db = Database::file(&temp_dir);
+    run_big_table_test(db);
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+fn run_big_table_test<M: TablePageStoreManager>(mut db: Database<M>) {
+    let create_table = r#"CREATE TABLE big_testing {
+    one INT
+    two VARCHAR(512)
+    three Bool
+}"#;
+    check_exec(&mut db, &create_table, 0);
+
+    let big_num = 10_000;
+    for i in 0..big_num {
+        check_exec(
+            &mut db,
+            &format!(
+                "INSERT INTO big_testing (one, two, three) VALUES ({}, \"{}\", {})",
+                i as i32,
+                (i % 10).to_string().repeat(100),
+                i % 2 == 0
+            ),
+            1,
+        );
+    }
+
+    let exp_rows = (0..big_num)
+        .map(|i| {
+            vec![
+                Column::Int(i),
+                Column::VarChar((i % 10).to_string().repeat(100)),
+                Column::Bool(i % 2 == 0),
+            ]
+        })
+        .collect();
+
+    check_query(&mut db, "SELECT * FROM big_testing", exp_rows)
+}
