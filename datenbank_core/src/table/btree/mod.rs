@@ -67,7 +67,7 @@ impl<S: TablePageStore> BTree<S> {
 
     pub fn scan(
         &mut self,
-        columns: Vec<Rc<String>>,
+        columns: &[Rc<String>],
         rp: impl Predicate<S>,
     ) -> Result<Vec<Vec<Column>>, Error> {
         let root_id = match self.root {
@@ -102,7 +102,7 @@ impl<S: TablePageStore> BTree<S> {
                     final_result.push(row.to_columns(
                         &mut self.data_cache,
                         &self.schema,
-                        &columns,
+                        columns,
                     )?);
                 }
             }
@@ -148,7 +148,11 @@ impl<S: TablePageStore> BTree<S> {
         }
     }
 
-    pub fn lookup(&mut self, key: &Vec<u8>) -> Result<Option<Vec<Column>>, Error> {
+    pub fn lookup(
+        &mut self,
+        key: &Vec<u8>,
+        columns: &[Rc<String>],
+    ) -> Result<Option<Vec<Column>>, Error> {
         let (leaf_id, _) = self.find_containing_leaf(key)?;
 
         let node = self.node_cache.get(leaf_id)?;
@@ -165,14 +169,8 @@ impl<S: TablePageStore> BTree<S> {
             }
         };
 
-        let columns: Vec<Rc<String>> = self
-            .schema
-            .columns()
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect();
         rows[i]
-            .to_columns(&mut self.data_cache, &self.schema, &columns)
+            .to_columns(&mut self.data_cache, &self.schema, columns)
             .map(Some)
             .map_err(Into::into)
     }
@@ -260,10 +258,12 @@ mod test {
         assert_eq!(root_id, leaf_id);
         assert!(parents.is_empty());
 
-        let missing = btree.lookup(&vec![0, 0, 0, 7]).unwrap();
+        let all_cols = vec!["foo".to_string().into()];
+
+        let missing = btree.lookup(&vec![0, 0, 0, 7], &all_cols).unwrap();
         assert_eq!(None, missing);
 
-        let found = btree.lookup(&vec![0, 0, 0, 1]).unwrap().unwrap();
+        let found = btree.lookup(&vec![0, 0, 0, 1], &all_cols).unwrap().unwrap();
         assert_eq!(vec![Column::Int(1)], found);
     }
 
@@ -326,16 +326,24 @@ mod test {
         assert_eq!(right_id, leaf_id);
         assert_eq!(vec![root_id], parents);
 
-        let missing = btree.lookup(&vec![0, 0, 0, 9]).unwrap();
+        let all_cols = vec!["foo".to_string().into()];
+
+        let missing = btree.lookup(&vec![0, 0, 0, 9], &all_cols).unwrap();
         assert_eq!(None, missing);
 
-        let found = btree.lookup(&vec![0, 0, 0, 1]).unwrap().unwrap();
+        let found = btree.lookup(&vec![0, 0, 0, 1], &all_cols).unwrap().unwrap();
         assert_eq!(vec![Column::Int(1)], found);
-        let found = btree.lookup(&vec![0, 0, 0, 7]).unwrap().unwrap();
+        let found = btree.lookup(&vec![0, 0, 0, 7], &all_cols).unwrap().unwrap();
         assert_eq!(vec![Column::Int(7)], found);
-        let found = btree.lookup(&vec![0, 0, 0, 10]).unwrap().unwrap();
+        let found = btree
+            .lookup(&vec![0, 0, 0, 10], &all_cols)
+            .unwrap()
+            .unwrap();
         assert_eq!(vec![Column::Int(10)], found);
-        let found = btree.lookup(&vec![0, 0, 0, 15]).unwrap().unwrap();
+        let found = btree
+            .lookup(&vec![0, 0, 0, 15], &all_cols)
+            .unwrap()
+            .unwrap();
         assert_eq!(vec![Column::Int(15)], found);
     }
 }

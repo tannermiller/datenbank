@@ -294,3 +294,63 @@ fn run_basic_test<M: TablePageStoreManager>(mut db: Database<M>, with_primary_ke
         }),
     )
 }
+
+#[test]
+fn test_index_memory_integration() {
+    let db = Database::memory();
+    run_index_test(db);
+}
+
+#[test]
+fn test_index_file_integration() {
+    let temp_dir = env::temp_dir().join("index_file_integration_test");
+    let _ = fs::remove_dir_all(&temp_dir);
+    let _ = fs::create_dir(&temp_dir);
+    let db = Database::file(&temp_dir);
+    run_index_test(db);
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+fn run_index_test<M: TablePageStoreManager>(mut db: Database<M>) {
+    let create_table = r#"CREATE TABLE index_testing {
+    foo INT
+    bar BOOL
+    baz VARCHAR(16)
+    qux LONGBLOB(32)
+    PRIMARY KEY (baz, foo)
+    INDEX idx_bar_foo (bar, foo)
+    INDEX idx_baz_bar (baz, bar)
+}"#;
+    check_exec(&mut db, &create_table, 0);
+
+    check_exec(
+        &mut db,
+        r#"INSERT INTO index_testing (foo, bar, baz, qux) VALUES
+(1, false, "hello", X'776f726c64'),
+(2, true, "world", X'68656c6c6f'),
+(3, false, "whats", X'7570'),
+(4, true, "up", X'7768617473')"#,
+        4,
+    );
+
+    // primary key
+    check_query(
+        &mut db,
+        "SELECT qux FROM index_testing WHERE baz = \"hello\" AND foo = 1",
+        vec![vec![Column::LongBlob(b"world".to_vec())]],
+    );
+
+    // idx_bar_foo
+    check_query(
+        &mut db,
+        "SELECT qux FROM index_testing WHERE bar = true AND foo = 2",
+        vec![vec![Column::LongBlob(b"hello".to_vec())]],
+    );
+
+    // idx_baz_bar
+    check_query(
+        &mut db,
+        "SELECT qux FROM index_testing WHERE baz = \"whats\" AND bar = false",
+        vec![vec![Column::LongBlob(b"up".to_vec())]],
+    );
+}

@@ -140,7 +140,7 @@ fn select_from<M: TablePageStoreManager>(
 
     let values = match where_clause_expr {
         Some(expr) => where_clause(&mut table, expr, expanded_columns)?,
-        None => Some(table.scan(expanded_columns, AllRows)?),
+        None => Some(table.scan(&expanded_columns, AllRows)?),
     };
 
     Ok(DatabaseResult::Query(QueryResult {
@@ -172,12 +172,12 @@ fn where_clause<S: TablePageStore>(
     if let Some((name, key)) = name_key {
         // TODO: Are we returning all the columns when we should only be returning some for
         // lookups?
-        match table.lookup_via_index(&name, &key) {
+        match table.lookup_via_index(&name, &key, &expanded_columns) {
             Ok(res) => Ok(res.map(|r| vec![r])),
             Err(err) => Err(err.into()),
         }
     } else {
-        match table.scan(expanded_columns, processed) {
+        match table.scan(&expanded_columns, processed) {
             Ok(res) => Ok(Some(res)),
             Err(err) => Err(err.into()),
         }

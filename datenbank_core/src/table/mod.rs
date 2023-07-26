@@ -142,23 +142,28 @@ impl<S: TablePageStore> Table<S> {
     // Scan the entire table for and return the values for every row for the provided columns.
     pub fn scan(
         &mut self,
-        columns: Vec<Rc<String>>,
+        columns: &[Rc<String>],
         rp: impl Predicate<S>,
     ) -> Result<Vec<Vec<Column>>, Error> {
         self.primary.scan(columns, rp).map_err(Into::into)
     }
 
-    pub fn lookup(&mut self, key: &Vec<u8>) -> Result<Option<Vec<Column>>, Error> {
-        self.primary.lookup(key).map_err(Into::into)
+    pub fn lookup(
+        &mut self,
+        key: &Vec<u8>,
+        columns: &[Rc<String>],
+    ) -> Result<Option<Vec<Column>>, Error> {
+        self.primary.lookup(key, columns).map_err(Into::into)
     }
 
     pub fn lookup_via_index(
         &mut self,
         name: &Rc<String>,
         key: &Vec<u8>,
+        columns: &[Rc<String>],
     ) -> Result<Option<Vec<Column>>, Error> {
         if name == &self.name {
-            return self.lookup(key);
+            return self.lookup(key, columns);
         }
 
         for secondary in &mut self.secondaries {
@@ -167,11 +172,12 @@ impl<S: TablePageStore> Table<S> {
             }
 
             let pk = secondary
-                .lookup(key)?
+                // TODO: This key slice could be set up with a lazy_static if we care
+                .lookup(key, &[Rc::new("key".to_string())])?
                 .and_then(|key_row| key_row.into_iter().last());
 
             if let Some(Column::LongBlob(pk)) = pk {
-                return self.lookup(&pk);
+                return self.lookup(&pk, columns);
             }
         }
 
@@ -487,10 +493,10 @@ mod test {
 
         let values = table
             .scan(
-                vec!["one", "two", "three"]
+                &vec!["one", "two", "three"]
                     .into_iter()
                     .map(|s| s.to_string().into())
-                    .collect(),
+                    .collect::<Vec<Rc<String>>>(),
                 AllRows,
             )
             .unwrap();
@@ -555,6 +561,11 @@ mod test {
             .unwrap();
         assert_eq!(3, rows_affected);
 
+        let all_cols: Vec<Rc<String>> = vec!["im", "so", "very", "cool"]
+            .into_iter()
+            .map(|s| s.to_string().into())
+            .collect();
+
         assert_eq!(
             vec![
                 Column::Int(1),
@@ -563,7 +574,11 @@ mod test {
                 Column::Int(3),
             ],
             table
-                .lookup_via_index(&Rc::new(name), &vec![0, 0, 0, 1, b'_', 0, 0, 0, 2])
+                .lookup_via_index(
+                    &Rc::new(name),
+                    &vec![0, 0, 0, 1, b'_', 0, 0, 0, 2],
+                    &all_cols
+                )
                 .unwrap()
                 .unwrap()
         );
@@ -578,7 +593,8 @@ mod test {
             table
                 .lookup_via_index(
                     &Rc::new("idx_so_im".to_string()),
-                    &vec![0, 0, 0, 5, b'_', 0, 0, 0, 4]
+                    &vec![0, 0, 0, 5, b'_', 0, 0, 0, 4],
+                    &all_cols,
                 )
                 .unwrap()
                 .unwrap()
@@ -594,7 +610,8 @@ mod test {
             table
                 .lookup_via_index(
                     &Rc::new("idx_very_so".to_string()),
-                    &vec![0, b'_', 0, 0, 0, 8]
+                    &vec![0, b'_', 0, 0, 0, 8],
+                    &all_cols,
                 )
                 .unwrap()
                 .unwrap()
