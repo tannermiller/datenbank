@@ -1,131 +1,17 @@
 use std::rc::Rc;
 
+use super::{DatabaseResult, Error, QueryResult};
 use crate::cache::Cache;
 use crate::key;
-use crate::pagestore::{Error as PageStoreError, TablePageStore, TablePageStoreManager};
+use crate::pagestore::{TablePageStore, TablePageStoreManager};
 use crate::parser::{
-    self, ColumnSchema, ColumnType as ParserColumnType, EqualityOp, Expression, Index, Input,
-    Literal, LogicalOp, SelectColumns, Terminal as ParserTerm,
+    self, EqualityOp, Expression, Literal, LogicalOp, SelectColumns, Terminal as ParserTerm,
 };
 use crate::row::{AllRows, Error as RowError, Predicate, Row};
-use crate::schema::{Column, ColumnType, Error as SchemaError, Schema};
-use crate::table::{Error as TableError, Table};
+use crate::schema::{Column, ColumnType, Schema};
+use crate::table::Table;
 
-#[derive(Debug, thiserror::Error, PartialEq)]
-pub enum Error {
-    #[error("table error")]
-    Table(#[from] TableError),
-    #[error("schema error")]
-    Schema(#[from] SchemaError),
-    #[error("page store error")]
-    PageStore(#[from] PageStoreError),
-    #[error("no such table {0}")]
-    NoSuchTable(String),
-    #[error("invalid where clause {0}")]
-    InvalidWhereClause(String),
-}
-
-#[derive(Debug, PartialEq)]
-pub struct ExecResult {
-    pub rows_affected: usize,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct QueryResult {
-    pub values: Vec<Vec<Column>>,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum DatabaseResult {
-    Exec(ExecResult),
-    Query(QueryResult),
-}
-
-pub fn execute<M: TablePageStoreManager>(
-    store_manager: &mut M,
-    input: Input,
-) -> Result<DatabaseResult, Error> {
-    match input {
-        Input::Create {
-            table_name,
-            columns,
-            primary_key,
-            indices,
-        } => create_table(store_manager, table_name, columns, primary_key, indices),
-        Input::InsertInto {
-            table_name,
-            columns,
-            values,
-        } => insert_into(store_manager, table_name, columns, values),
-        Input::SelectFrom {
-            table_name,
-            columns,
-            where_clause,
-        } => select_from(store_manager, table_name, columns, where_clause),
-    }
-}
-
-fn create_table<M: TablePageStoreManager>(
-    store_manager: &mut M,
-    table_name: &str,
-    columns: Vec<ColumnSchema>,
-    primary_key: Option<Vec<&str>>,
-    indices: Vec<Index>,
-) -> Result<DatabaseResult, Error> {
-    let schema = parser_schema_to_table_schema(columns, primary_key, indices)?;
-    Table::create(
-        table_name.to_string(),
-        schema,
-        &mut store_manager.builder(table_name)?,
-    )?;
-    Ok(DatabaseResult::Exec(ExecResult { rows_affected: 0 }))
-}
-
-fn parser_schema_to_table_schema(
-    parser_schema: Vec<ColumnSchema>,
-    primary_key: Option<Vec<&str>>,
-    indices: Vec<Index>,
-) -> Result<Schema, Error> {
-    let columns = parser_schema
-        .into_iter()
-        .map(|ps| {
-            let ct = match ps.column_type {
-                ParserColumnType::Int => ColumnType::Int,
-                ParserColumnType::Bool => ColumnType::Bool,
-                ParserColumnType::VarChar(size) => ColumnType::VarChar(size),
-                ParserColumnType::LongBlob(size) => ColumnType::LongBlob(size),
-            };
-            (ps.column_name.to_string(), ct)
-        })
-        .collect();
-
-    let indices = indices
-        .into_iter()
-        .map(|idx| (idx.name, idx.columns))
-        .collect();
-
-    Schema::new(columns, primary_key, indices).map_err(Into::into)
-}
-
-fn insert_into<M: TablePageStoreManager>(
-    store_manager: &mut M,
-    table_name: &str,
-    columns: Vec<&str>,
-    values: Vec<Vec<Literal>>,
-) -> Result<DatabaseResult, Error> {
-    let mut table = match Table::load(&mut store_manager.builder(table_name)?)? {
-        Some(table) => table,
-        None => return Err(Error::NoSuchTable(table_name.to_string())),
-    };
-
-    let column_values = table.schema().literals_to_columns(&columns, values)?;
-
-    let rows_affected = table.insert(&columns, column_values)?;
-
-    Ok(DatabaseResult::Exec(ExecResult { rows_affected }))
-}
-
-fn select_from<M: TablePageStoreManager>(
+pub fn select_from<M: TablePageStoreManager>(
     store_manager: &mut M,
     table_name: &str,
     columns: SelectColumns,
@@ -182,35 +68,6 @@ fn where_clause<S: TablePageStore>(
             Err(err) => Err(err.into()),
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum Terminal {
-    Field(Rc<String>),
-    Literal(Literal),
-}
-
-impl From<parser::Terminal<'_>> for Terminal {
-    fn from(t: parser::Terminal) -> Terminal {
-        match t {
-            parser::Terminal::Identifier(id) => Terminal::Field(id.to_string().into()),
-            parser::Terminal::Literal(lit) => Terminal::Literal(lit),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-struct Comparison {
-    left: Terminal,
-    op: EqualityOp,
-    right: Terminal,
-    next: Option<Box<Logical>>,
-}
-
-#[derive(Debug, PartialEq)]
-struct Logical {
-    op: LogicalOp,
-    right: Comparison,
 }
 
 fn process_expression(expr: Expression) -> Result<Comparison, Error> {
@@ -328,6 +185,35 @@ fn is_key_lookup(schema: &Schema, expr: &Comparison) -> Option<Vec<u8>> {
     }
 
     Some(key::build(&found_key_parts))
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum Terminal {
+    Field(Rc<String>),
+    Literal(Literal),
+}
+
+impl From<parser::Terminal<'_>> for Terminal {
+    fn from(t: parser::Terminal) -> Terminal {
+        match t {
+            parser::Terminal::Identifier(id) => Terminal::Field(id.to_string().into()),
+            parser::Terminal::Literal(lit) => Terminal::Literal(lit),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct Comparison {
+    left: Terminal,
+    op: EqualityOp,
+    right: Terminal,
+    next: Option<Box<Logical>>,
+}
+
+#[derive(Debug, PartialEq)]
+struct Logical {
+    op: LogicalOp,
+    right: Comparison,
 }
 
 impl<S: TablePageStore> Predicate<S> for Comparison {
