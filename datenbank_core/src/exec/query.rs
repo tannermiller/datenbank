@@ -47,72 +47,61 @@ fn where_clause<S: TablePageStore>(
 
     let processed = process_expression(expr)?;
 
-    let name_key = table
-        .schemas()
-        .iter()
-        .fold(None, |found, (name, schema)| match found {
-            Some(found) => Some(found),
-            None => is_key_lookup(schema, &processed).map(|key| (name.clone(), key)),
-        });
+    let (primary_schema, secondary_schemas) = table.schemas();
+    let strategy = determine_strategy(primary_schema, &secondary_schemas, &processed);
 
-    if let Some((name, key)) = name_key {
-        // TODO: Are we returning all the columns when we should only be returning some for
-        // lookups?
-        match table.lookup_via_index(&name, &key, &expanded_columns) {
-            Ok(res) => Ok(res.map(|r| vec![r])),
-            Err(err) => Err(err.into()),
+    match strategy {
+        Strategy::FullScan => table.scan(&expanded_columns, processed).map(Some),
+
+        Strategy::KeyLookup(ind, key) => match ind {
+            Index::Primary => table.lookup(&key, &expanded_columns),
+            Index::Secondary(name) => table.lookup_via_index(&name, &key, &expanded_columns),
         }
-    } else {
-        match table.scan(&expanded_columns, processed) {
-            Ok(res) => Ok(Some(res)),
-            Err(err) => Err(err.into()),
-        }
+        .map(|r| r.map(|x| vec![x])),
+
+        Strategy::RangeScan(_, _) => todo!(),
     }
+    .map_err(Into::into)
 }
 
-fn process_expression(expr: Expression) -> Result<Comparison, Error> {
-    match expr {
-        Expression::Comparison(left, op, right) => Ok(Comparison {
-            left: left.into(),
-            op,
-            right: right.into(),
-            next: None,
-        }),
-        Expression::Logical(left, op, right) => process_logical(*left, op, *right),
-    }
+#[derive(Debug, PartialEq)]
+enum Index {
+    Primary,
+    Secondary(Rc<String>),
 }
 
-fn process_comparison(left: ParserTerm, op: EqualityOp, right: ParserTerm) -> Comparison {
-    Comparison {
-        left: left.into(),
-        op,
-        right: right.into(),
-        next: None,
-    }
+#[derive(Debug, PartialEq)]
+enum Range {
+    Closed(Vec<u8>, Vec<u8>),
+    OpenLow(Vec<u8>),
+    OpenHigh(Vec<u8>),
 }
 
-fn process_logical(
-    left: Expression,
-    op: LogicalOp,
-    right: Expression,
-) -> Result<Comparison, Error> {
-    let mut left = match left {
-        Expression::Comparison(l, o, r) => process_comparison(l, o, r),
-        Expression::Logical(..) => {
-            return Err(Error::InvalidWhereClause(
-                "unexpected logical left of logical".to_string(),
-            ))
+#[derive(Debug, PartialEq)]
+enum Strategy {
+    FullScan,
+    KeyLookup(Index, Vec<u8>),
+    RangeScan(Index, Range),
+}
+
+fn determine_strategy(
+    primary: &Schema,
+    secondaries: &[(Rc<String>, &Schema)],
+    expr: &Comparison,
+) -> Strategy {
+    if let Some(key) = is_key_lookup(primary, expr) {
+        return Strategy::KeyLookup(Index::Primary, key);
+    }
+
+    for (name, secondary) in secondaries {
+        if let Some(key) = is_key_lookup(secondary, &expr) {
+            return Strategy::KeyLookup(Index::Secondary(name.clone()), key);
         }
-    };
+    }
 
-    let right = match right {
-        Expression::Comparison(l, o, r) => process_comparison(l, o, r),
-        Expression::Logical(l, o, r) => process_logical(*l, o, *r)?,
-    };
+    // TODO: Range Scans
 
-    left.next = Some(Box::new(Logical { op, right }));
-
-    Ok(left)
+    Strategy::FullScan
 }
 
 // Determine if this comparison is a direct key lookup (i.e. contains a complete key) for a key
@@ -214,6 +203,51 @@ struct Comparison {
 struct Logical {
     op: LogicalOp,
     right: Comparison,
+}
+
+fn process_expression(expr: Expression) -> Result<Comparison, Error> {
+    match expr {
+        Expression::Comparison(left, op, right) => Ok(Comparison {
+            left: left.into(),
+            op,
+            right: right.into(),
+            next: None,
+        }),
+        Expression::Logical(left, op, right) => process_logical(*left, op, *right),
+    }
+}
+
+fn process_comparison(left: ParserTerm, op: EqualityOp, right: ParserTerm) -> Comparison {
+    Comparison {
+        left: left.into(),
+        op,
+        right: right.into(),
+        next: None,
+    }
+}
+
+fn process_logical(
+    left: Expression,
+    op: LogicalOp,
+    right: Expression,
+) -> Result<Comparison, Error> {
+    let mut left = match left {
+        Expression::Comparison(l, o, r) => process_comparison(l, o, r),
+        Expression::Logical(..) => {
+            return Err(Error::InvalidWhereClause(
+                "unexpected logical left of logical".to_string(),
+            ))
+        }
+    };
+
+    let right = match right {
+        Expression::Comparison(l, o, r) => process_comparison(l, o, r),
+        Expression::Logical(l, o, r) => process_logical(*l, o, *r)?,
+    };
+
+    left.next = Some(Box::new(Logical { op, right }));
+
+    Ok(left)
 }
 
 impl<S: TablePageStore> Predicate<S> for Comparison {
@@ -572,13 +606,15 @@ mod test {
     }
 
     #[test]
-    fn test_is_key_lookup() {
+    fn test_determine_strategy() {
         let one_field_schema =
             Schema::new(vec![("foo".into(), ColumnType::Int)], None, vec![]).unwrap();
+
         assert_eq!(
-            None,
-            is_key_lookup(
+            Strategy::FullScan,
+            determine_strategy(
                 &one_field_schema,
+                &[],
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::LessThan,
@@ -588,9 +624,10 @@ mod test {
             )
         );
         assert_eq!(
-            Some(vec![0, 0, 0, 7]),
-            is_key_lookup(
+            Strategy::KeyLookup(Index::Primary, vec![0, 0, 0, 7]),
+            determine_strategy(
                 &one_field_schema,
+                &[],
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
@@ -610,10 +647,12 @@ mod test {
             vec![],
         )
         .unwrap();
+
         assert_eq!(
-            None,
-            is_key_lookup(
+            Strategy::FullScan,
+            determine_strategy(
                 &multi_field_schema_no_primary_key,
+                &[],
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::LessThan,
@@ -623,9 +662,10 @@ mod test {
             )
         );
         assert_eq!(
-            None,
-            is_key_lookup(
+            Strategy::FullScan,
+            determine_strategy(
                 &multi_field_schema_no_primary_key,
+                &[],
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
@@ -635,9 +675,10 @@ mod test {
             )
         );
         assert_eq!(
-            None,
-            is_key_lookup(
+            Strategy::FullScan,
+            determine_strategy(
                 &multi_field_schema_no_primary_key,
+                &[],
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
@@ -655,11 +696,13 @@ mod test {
             )
         );
         assert_eq!(
-            Some(vec![
-                0, 0, 0, 7, b'_', 1, b'_', b'k', b'a', b'b', b'o', b'o', b'm'
-            ]),
-            is_key_lookup(
+            Strategy::KeyLookup(
+                Index::Primary,
+                vec![0, 0, 0, 7, b'_', 1, b'_', b'k', b'a', b'b', b'o', b'o', b'm'],
+            ),
+            determine_strategy(
                 &multi_field_schema_no_primary_key,
+                &[],
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
@@ -685,9 +728,10 @@ mod test {
             )
         );
         assert_eq!(
-            None,
-            is_key_lookup(
+            Strategy::FullScan,
+            determine_strategy(
                 &multi_field_schema_no_primary_key,
+                &[],
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
@@ -723,10 +767,12 @@ mod test {
             vec![],
         )
         .unwrap();
+
         assert_eq!(
-            None,
-            is_key_lookup(
+            Strategy::FullScan,
+            determine_strategy(
                 &multi_field_schema_with_primary_key,
+                &[],
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::LessThan,
@@ -736,9 +782,10 @@ mod test {
             )
         );
         assert_eq!(
-            None,
-            is_key_lookup(
+            Strategy::FullScan,
+            determine_strategy(
                 &multi_field_schema_with_primary_key,
+                &[],
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,
@@ -748,9 +795,10 @@ mod test {
             )
         );
         assert_eq!(
-            Some(vec![0, 0, 0, 7, b'_', 1,]),
-            is_key_lookup(
+            Strategy::KeyLookup(Index::Primary, vec![0, 0, 0, 7, b'_', 1,]),
+            determine_strategy(
                 &multi_field_schema_with_primary_key,
+                &[],
                 &Comparison {
                     left: Terminal::Field("foo".to_string().into()),
                     op: EqualityOp::Equal,

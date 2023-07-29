@@ -100,11 +100,14 @@ impl<S: TablePageStore> Table<S> {
         &self.schema
     }
 
-    pub fn schemas(&self) -> Vec<(Rc<String>, &Schema)> {
-        let mut schemas = Vec::with_capacity(self.secondaries.len() + 1);
-        schemas.push((self.name.clone(), &self.schema));
-        schemas.extend(self.secondaries.iter().map(|s| (s.name.clone(), &s.schema)));
-        schemas
+    pub fn schemas(&self) -> (&Schema, Vec<(Rc<String>, &Schema)>) {
+        (
+            &self.schema,
+            self.secondaries
+                .iter()
+                .map(|s| (s.name.clone(), &s.schema))
+                .collect(),
+        )
     }
 
     // Insert the values into the specified columns. Returns the number of rows updated.
