@@ -29,6 +29,25 @@ pub enum Error {
     Row(#[from] RowError),
 }
 
+pub enum Bound<'a> {
+    Inclusive(&'a [u8]),
+    Exclusive(&'a [u8]),
+}
+
+pub enum Range<'a> {
+    // Represents a closed internal range. Contains the inclusive low key and the exclusive high
+    // key.
+    Closed(Bound<'a>, Bound<'a>),
+
+    // Represents a range that begins at the lowest value currently in the index and goes up to the
+    // provided high range bound.
+    OpenLow(Bound<'a>),
+
+    // Represents a range that begins at the low key bound and goes all the way to the highest
+    // value currently in the index.
+    OpenHigh(Bound<'a>),
+}
+
 // A Table is responsible for the management of everything pertaining to a single database table's
 // data. It manages the table btree, any indices as well as the persistence of the table.
 #[derive(Debug)]
@@ -185,6 +204,29 @@ impl<S: TablePageStore> Table<S> {
         }
 
         Ok(None)
+    }
+
+    // Scans the provided key range directly against the primary index. The low key value is
+    // inclusive; the high key value is exclusive.
+    pub fn scan_range(
+        &mut self,
+        columns: &[Rc<String>],
+        rp: impl Predicate<S>,
+        range: Range,
+    ) -> Result<Vec<Vec<Column>>, Error> {
+        todo!()
+    }
+
+    // Scans the provided key range against the named secondary index. The low key value is
+    // inclusive; the high key value is exclusive.
+    pub fn scan_range_via_index(
+        &mut self,
+        name: &Rc<String>,
+        columns: &[Rc<String>],
+        rp: impl Predicate<S>,
+        range: Range,
+    ) -> Result<Vec<Vec<Column>>, Error> {
+        todo!()
     }
 }
 

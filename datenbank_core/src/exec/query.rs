@@ -9,7 +9,7 @@ use crate::parser::{
 };
 use crate::row::{AllRows, Error as RowError, Predicate, Row};
 use crate::schema::{Column, ColumnType, Schema};
-use crate::table::Table;
+use crate::table::{Bound as TableBound, Range as TableRange, Table};
 
 pub fn select_from<M: TablePageStoreManager>(
     store_manager: &mut M,
@@ -53,13 +53,18 @@ fn where_clause<S: TablePageStore>(
     match strategy {
         Strategy::FullScan => table.scan(&expanded_columns, processed).map(Some),
 
-        Strategy::KeyLookup(ind, key) => match ind {
+        Strategy::KeyLookup(idx, key) => match idx {
             Index::Primary => table.lookup(&key, &expanded_columns),
             Index::Secondary(name) => table.lookup_via_index(&name, &key, &expanded_columns),
         }
         .map(|r| r.map(|x| vec![x])),
 
-        Strategy::RangeScan(_, _) => todo!(),
+        Strategy::RangeScan(Index::Primary, rng) => table
+            .scan_range(&expanded_columns, processed, (&rng).into())
+            .map(Some),
+        Strategy::RangeScan(Index::Secondary(name), rng) => table
+            .scan_range_via_index(&name, &expanded_columns, processed, (&rng).into())
+            .map(Some),
     }
     .map_err(Into::into)
 }
@@ -70,18 +75,79 @@ enum Index {
     Secondary(Rc<String>),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Bound<T: Clone + std::fmt::Debug + PartialEq> {
+    Inclusive(T),
+    Exclusive(T),
+}
+
+impl<T: Clone + std::fmt::Debug + PartialEq> Bound<T> {
+    fn map<U, F>(self, f: F) -> Bound<U>
+    where
+        U: Clone + std::fmt::Debug + PartialEq,
+        F: Fn(T) -> U,
+    {
+        use Bound::*;
+        match self {
+            Inclusive(t) => Inclusive(f(t)),
+            Exclusive(t) => Exclusive(f(t)),
+        }
+    }
+}
+
+impl<'a> From<&'a Bound<Vec<u8>>> for TableBound<'a> {
+    fn from(bnd: &'a Bound<Vec<u8>>) -> TableBound {
+        match bnd {
+            Bound::Inclusive(i) => TableBound::Inclusive(i),
+            Bound::Exclusive(e) => TableBound::Exclusive(e),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
-enum Range {
-    Closed(Vec<u8>, Vec<u8>),
-    OpenLow(Vec<u8>),
-    OpenHigh(Vec<u8>),
+enum Range<T: Clone + std::fmt::Debug + PartialEq> {
+    // Represents a closed internal range. Contains the low key bound and the high key bound.
+    Closed(Bound<T>, Bound<T>),
+
+    // Represents a range that begins at the lowest value currently in the index and goes up to the
+    // high range bound.
+    OpenLow(Bound<T>),
+
+    // Represents a range that begins at the low key bound and goes all the way to the highest
+    // value currently in the index.
+    OpenHigh(Bound<T>),
+}
+
+impl<T: Clone + std::fmt::Debug + PartialEq> Range<T> {
+    fn map<U, F>(self, f: F) -> Range<U>
+    where
+        U: Clone + std::fmt::Debug + PartialEq,
+        F: Fn(T) -> U,
+    {
+        use Range::*;
+        match self {
+            Closed(low, high) => Closed(low.map(&f), high.map(&f)),
+            OpenLow(bnd) => OpenLow(bnd.map(f)),
+            OpenHigh(bnd) => OpenHigh(bnd.map(f)),
+        }
+    }
+}
+
+impl<'a> From<&'a Range<Vec<u8>>> for TableRange<'a> {
+    fn from(rng: &'a Range<Vec<u8>>) -> TableRange {
+        match rng {
+            Range::Closed(low, high) => TableRange::Closed(low.into(), high.into()),
+            Range::OpenLow(high) => TableRange::OpenLow(high.into()),
+            Range::OpenHigh(low) => TableRange::OpenHigh(low.into()),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
 enum Strategy {
     FullScan,
     KeyLookup(Index, Vec<u8>),
-    RangeScan(Index, Range),
+    RangeScan(Index, Range<Vec<u8>>),
 }
 
 fn determine_strategy(
@@ -99,19 +165,21 @@ fn determine_strategy(
         }
     }
 
-    // TODO: Range Scans
+    if let Some(range) = is_key_range(primary, expr) {
+        return Strategy::RangeScan(Index::Primary, range);
+    }
+
+    for (name, secondary) in secondaries {
+        if let Some(range) = is_key_range(secondary, &expr) {
+            return Strategy::RangeScan(Index::Secondary(name.clone()), range);
+        }
+    }
 
     Strategy::FullScan
 }
 
-// Determine if this comparison is a direct key lookup (i.e. contains a complete key) for a key
-// defined in the schema.
-fn is_key_lookup(schema: &Schema, expr: &Comparison) -> Option<Vec<u8>> {
-    // TODO:If we have a complete key and still more comparisons, do we do a lookup and apply a
-    // predicate?
-
-    let key_fields: Vec<&(Rc<String>, ColumnType)> = if let Some(pk) = schema.primary_key_columns()
-    {
+fn key_fields(schema: &Schema) -> Vec<&(Rc<String>, ColumnType)> {
+    if let Some(pk) = schema.primary_key_columns() {
         pk.iter()
             .map(|k| {
                 for col @ (col_name, _) in schema.columns() {
@@ -126,9 +194,17 @@ fn is_key_lookup(schema: &Schema, expr: &Comparison) -> Option<Vec<u8>> {
             .collect()
     } else {
         schema.columns().iter().collect()
-    };
+    }
+}
 
-    // This should be the key len once we have keys that are less than the full schema.
+// Determine if this comparison is a direct key lookup (i.e. contains a complete key) for a key
+// defined in the schema.
+fn is_key_lookup(schema: &Schema, expr: &Comparison) -> Option<Vec<u8>> {
+    // TODO:If we have a complete key and still more comparisons, do we do a lookup and apply a
+    // predicate?
+
+    let key_fields = key_fields(schema);
+
     let mut key_parts = vec![None; key_fields.len()];
 
     let mut comp = expr;
@@ -174,6 +250,155 @@ fn is_key_lookup(schema: &Schema, expr: &Comparison) -> Option<Vec<u8>> {
     }
 
     Some(key::build(&found_key_parts))
+}
+
+fn is_key_range(schema: &Schema, expr: &Comparison) -> Option<Range<Vec<u8>>> {
+    let key_fields = key_fields(schema);
+
+    // we will build up a list of low and high bounds for each key field so that we can determine
+    // if we have a closd or open bound in a prefix for each one
+    let mut range_parts: Vec<(Option<Bound<&Literal>>, Option<Bound<&Literal>>)> =
+        vec![(None, None); key_fields.len()];
+
+    let mut comp = expr;
+    loop {
+        // NotEqual is the only inequality that doesn't lend itself to making a range.
+        if comp.op == EqualityOp::NotEqual {
+            return None;
+        }
+
+        let (id, lit) = match (&comp.left, &comp.right) {
+            (Terminal::Field(id), Terminal::Literal(lit))
+            | (Terminal::Literal(lit), Terminal::Field(id)) => (id, lit),
+            _ => return None,
+        };
+
+        let mut found = false;
+        for (i, (col, ct)) in key_fields.iter().enumerate() {
+            if !(id == col && ct.is_congruent_literal(lit)) {
+                continue;
+            }
+
+            // We aggregate all of the expressions per field so that we end up with just a pair of
+            // bounds per field, a low and a high.
+            match (comp.op, &mut range_parts[i]) {
+                // equality acts as both upper and lower bound
+                (EqualityOp::Equal, x @ (None, None)) => {
+                    *x = (Some(Bound::Inclusive(lit)), Some(Bound::Inclusive(lit)));
+                }
+                (EqualityOp::Equal, _) => return None,
+
+                // greater than provides an exclusive lower bound
+                (EqualityOp::GreaterThan, x @ (None, _)) => {
+                    x.0 = Some(Bound::Exclusive(lit));
+                }
+                (EqualityOp::GreaterThan, _) => return None,
+
+                // greater than or equal to provides an inclusive lower bound
+                (EqualityOp::GreaterThanOrEqualTo, x @ (None, _)) => {
+                    x.0 = Some(Bound::Inclusive(lit));
+                }
+                (EqualityOp::GreaterThanOrEqualTo, _) => return None,
+
+                // less than provides an exclusive upper bound
+                (EqualityOp::LessThan, x @ (_, None)) => {
+                    x.1 = Some(Bound::Exclusive(lit));
+                }
+                (EqualityOp::LessThan, _) => return None,
+
+                // less than or equal to provides an inclusive upper bound
+                (EqualityOp::LessThanOrEqualTo, x @ (_, None)) => {
+                    x.1 = Some(Bound::Inclusive(lit));
+                }
+                (EqualityOp::LessThanOrEqualTo, _) => return None,
+
+                // not equal can't be served by an index range scan
+                (EqualityOp::NotEqual, _) => return None,
+            };
+            found = true;
+        }
+
+        // This is just until we start implementing key prefixes or something else that would allow it
+        // to be ok to not find it.
+        if !found {
+            return None;
+        }
+
+        match &comp.next {
+            // TODO: I'm still not sure how to handle ORs
+            // TODO: I could probably do ORs if we have a more solid prefix
+            Some(log) if log.op == LogicalOp::And => {
+                comp = &log.right;
+            }
+            _ => break,
+        }
+    }
+
+    // The first range part determines which type of range it is.
+    let mut range = match range_parts.pop().unwrap() {
+        (None, None) => return None,
+        (Some(bnd), None) => Range::OpenHigh(bnd.map(|b| vec![b])),
+        (None, Some(bnd)) => Range::OpenLow(bnd.map(|b| vec![b])),
+        (Some(low), Some(high)) => Range::Closed(low.map(|l| vec![l]), high.map(|h| vec![h])),
+    };
+
+    // Now we iterate through each key field bound set and aggregate it into a single final Range &
+    // Bound that contains the key(s) that define the range to scan.
+    for rp in range_parts {
+        match (rp, &mut range) {
+            ((Some(Bound::Inclusive(l)), None), Range::OpenHigh(Bound::Inclusive(rng))) => {
+                rng.push(l);
+            }
+            ((Some(Bound::Exclusive(l)), None), Range::OpenHigh(Bound::Exclusive(rng))) => {
+                rng.push(l);
+            }
+
+            ((None, Some(Bound::Inclusive(l))), Range::OpenLow(Bound::Inclusive(rng))) => {
+                rng.push(l);
+            }
+            ((None, Some(Bound::Exclusive(l))), Range::OpenLow(Bound::Exclusive(rng))) => {
+                rng.push(l);
+            }
+
+            (
+                (Some(Bound::Inclusive(low)), Some(Bound::Inclusive(high))),
+                Range::Closed(Bound::Inclusive(low_rng), Bound::Inclusive(high_rng)),
+            ) => {
+                high_rng.push(high);
+                low_rng.push(low);
+            }
+            (
+                (Some(Bound::Inclusive(low)), Some(Bound::Exclusive(high))),
+                Range::Closed(Bound::Inclusive(low_rng), Bound::Exclusive(high_rng)),
+            ) => {
+                high_rng.push(high);
+                low_rng.push(low);
+            }
+            (
+                (Some(Bound::Exclusive(low)), Some(Bound::Exclusive(high))),
+                Range::Closed(Bound::Exclusive(low_rng), Bound::Exclusive(high_rng)),
+            ) => {
+                high_rng.push(high);
+                low_rng.push(low);
+            }
+            (
+                (Some(Bound::Exclusive(low)), Some(Bound::Inclusive(high))),
+                Range::Closed(Bound::Exclusive(low_rng), Bound::Inclusive(high_rng)),
+            ) => {
+                high_rng.push(high);
+                low_rng.push(low);
+            }
+
+            ((None, None), _)
+            | ((Some(_), None), Range::OpenLow(_))
+            | ((None, Some(_)), Range::OpenHigh(_)) => return None,
+
+            // TODO: There's probably other valid aggregations
+            _ => return None,
+        }
+    }
+
+    Some(range.map(|x| key::build(&x)))
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -611,7 +836,10 @@ mod test {
             Schema::new(vec![("foo".into(), ColumnType::Int)], None, vec![]).unwrap();
 
         assert_eq!(
-            Strategy::FullScan,
+            Strategy::RangeScan(
+                Index::Primary,
+                Range::OpenLow(Bound::Exclusive(vec![0, 0, 0, 7]))
+            ),
             determine_strategy(
                 &one_field_schema,
                 &[],
@@ -620,6 +848,33 @@ mod test {
                     op: EqualityOp::LessThan,
                     right: Terminal::Literal(Literal::Int(7)),
                     next: None,
+                }
+            )
+        );
+        assert_eq!(
+            Strategy::RangeScan(
+                Index::Primary,
+                Range::Closed(
+                    Bound::Exclusive(vec![0, 0, 0, 7]),
+                    Bound::Inclusive(vec![0, 0, 0, 24])
+                )
+            ),
+            determine_strategy(
+                &one_field_schema,
+                &[],
+                &Comparison {
+                    left: Terminal::Field("foo".to_string().into()),
+                    op: EqualityOp::LessThanOrEqualTo,
+                    right: Terminal::Literal(Literal::Int(24)),
+                    next: Some(Box::new(Logical {
+                        op: LogicalOp::And,
+                        right: Comparison {
+                            left: Terminal::Literal(Literal::Int(7)),
+                            op: EqualityOp::GreaterThan,
+                            right: Terminal::Field("foo".to_string().into()),
+                            next: None,
+                        }
+                    })),
                 }
             )
         );
@@ -741,6 +996,35 @@ mod test {
                         right: Comparison {
                             left: Terminal::Field("bar".to_string().into()),
                             op: EqualityOp::Equal,
+                            right: Terminal::Literal(Literal::Bool(true)),
+                            next: Some(Box::new(Logical {
+                                op: LogicalOp::And,
+                                right: Comparison {
+                                    left: Terminal::Field("qux".to_string().into()),
+                                    op: EqualityOp::GreaterThan,
+                                    right: Terminal::Literal(Literal::String("kaboom".to_string())),
+                                    next: None,
+                                }
+                            })),
+                        }
+                    })),
+                }
+            )
+        );
+        assert_eq!(
+            Strategy::FullScan,
+            determine_strategy(
+                &multi_field_schema_no_primary_key,
+                &[],
+                &Comparison {
+                    left: Terminal::Field("foo".to_string().into()),
+                    op: EqualityOp::GreaterThan,
+                    right: Terminal::Literal(Literal::Int(7)),
+                    next: Some(Box::new(Logical {
+                        op: LogicalOp::And,
+                        right: Comparison {
+                            left: Terminal::Field("bar".to_string().into()),
+                            op: EqualityOp::GreaterThanOrEqualTo,
                             right: Terminal::Literal(Literal::Bool(true)),
                             next: Some(Box::new(Logical {
                                 op: LogicalOp::And,
