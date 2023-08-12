@@ -5,6 +5,7 @@ use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder
 use crate::row::{Error as RowError, Predicate, Row, RowBytes, RowCol};
 use crate::schema::{Column, Error as SchemaError, Schema};
 use btree::{BTree, Error as BTreeError};
+pub use btree::{Bound, Range};
 
 pub(crate) mod btree;
 mod header;
@@ -27,25 +28,6 @@ pub enum Error {
     InvalidInsert(String),
     #[error("row error")]
     Row(#[from] RowError),
-}
-
-pub enum Bound<'a> {
-    Inclusive(&'a [u8]),
-    Exclusive(&'a [u8]),
-}
-
-pub enum Range<'a> {
-    // Represents a closed internal range. Contains the inclusive low key and the exclusive high
-    // key.
-    Closed(Bound<'a>, Bound<'a>),
-
-    // Represents a range that begins at the lowest value currently in the index and goes up to the
-    // provided high range bound.
-    OpenLow(Bound<'a>),
-
-    // Represents a range that begins at the low key bound and goes all the way to the highest
-    // value currently in the index.
-    OpenHigh(Bound<'a>),
 }
 
 // A Table is responsible for the management of everything pertaining to a single database table's
@@ -214,7 +196,9 @@ impl<S: TablePageStore> Table<S> {
         rp: impl Predicate<S>,
         range: Range,
     ) -> Result<Vec<Vec<Column>>, Error> {
-        todo!()
+        self.primary
+            .scan_range(columns, rp, range)
+            .map_err(Into::into)
     }
 
     // Scans the provided key range against the named secondary index. The low key value is
@@ -226,7 +210,31 @@ impl<S: TablePageStore> Table<S> {
         rp: impl Predicate<S>,
         range: Range,
     ) -> Result<Vec<Vec<Column>>, Error> {
-        todo!()
+        if name == &self.name {
+            return self.scan_range(columns, rp, range);
+        }
+
+        for secondary in &mut self.secondaries {
+            if &secondary.name != name {
+                continue;
+            }
+
+            let pks = secondary
+                // TODO: This key slice could be set up with a lazy_static if we care
+                .scan_range(&[Rc::new("key".to_string())], rp, range)?;
+
+            let mut result = Vec::with_capacity(pks.len());
+            for pk in pks {
+                if let [Column::LongBlob(ref pk), ..] = pk[..] {
+                    if let Some(res) = secondary.lookup(pk, columns)? {
+                        result.push(res);
+                    }
+                };
+            }
+            return Ok(result);
+        }
+
+        Ok(vec![])
     }
 }
 

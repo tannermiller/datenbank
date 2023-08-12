@@ -26,6 +26,25 @@ pub enum Error {
     Row(#[from] RowError),
 }
 
+pub enum Bound<'a> {
+    Inclusive(&'a [u8]),
+    Exclusive(&'a [u8]),
+}
+
+pub enum Range<'a> {
+    // Represents a closed internal range. Contains the inclusive low key and the exclusive high
+    // key.
+    Closed(Bound<'a>, Bound<'a>),
+
+    // Represents a range that begins at the lowest value currently in the index and goes up to the
+    // provided high range bound.
+    OpenLow(Bound<'a>),
+
+    // Represents a range that begins at the low key bound and goes all the way to the highest
+    // value currently in the index.
+    OpenHigh(Bound<'a>),
+}
+
 // BTRee is a B+ tree that stores the data in a key value store.
 #[derive(Debug)]
 pub struct BTree<S: TablePageStore> {
@@ -173,6 +192,15 @@ impl<S: TablePageStore> BTree<S> {
             .to_columns(&mut self.data_cache, &self.schema, columns)
             .map(Some)
             .map_err(Into::into)
+    }
+
+    pub fn scan_range(
+        &mut self,
+        columns: &[Rc<String>],
+        rp: impl Predicate<S>,
+        range: Range,
+    ) -> Result<Vec<Vec<Column>>, Error> {
+        todo!()
     }
 
     fn commit(&mut self) -> Result<(), Error> {
