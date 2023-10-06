@@ -1,6 +1,6 @@
 use super::node::{Internal, Leaf, Node, NodeBody};
 use super::{BTree, Error};
-use crate::pagestore::TablePageStore;
+use crate::pagestore::{PageID, TablePageStore};
 use crate::row::{self, Row};
 use crate::schema::Column;
 
@@ -56,7 +56,7 @@ impl<S: TablePageStore> BTree<S> {
         Ok((inserted_rows, changed_root))
     }
 
-    fn insert_row(&mut self, root_id: usize, row: Row) -> Result<Option<usize>, Error> {
+    fn insert_row(&mut self, root_id: PageID, row: Row) -> Result<Option<PageID>, Error> {
         // The insert algo goes like:
         //   * Search down the tree and find the node id of the leaf we need to insert the row
         //     into.
@@ -206,12 +206,17 @@ mod test {
         assert!(orig_root_id != new_root_id);
         let mut node_cache: Cache<_, Node> = Cache::new(store_builder.build().unwrap());
         assert_node(
-            &internal_node(new_root_id, 2, vec![vec![0, 0, 0, 2]], vec![1, 2]),
+            &internal_node(
+                new_root_id,
+                2,
+                vec![vec![0, 0, 0, 2]],
+                vec![1u32.into(), 2u32.into()],
+            ),
             &mut node_cache,
         );
 
-        let left_id = 1;
-        let right_id = 2;
+        let left_id = 1u32.into();
+        let right_id = 2u32.into();
         assert_node(
             &leaf_node(
                 left_id,
@@ -239,38 +244,51 @@ mod test {
         let next_new_root_id = btree.root.unwrap();
         assert!(new_root_id != next_new_root_id);
         assert_node(
-            &internal_node(next_new_root_id, 2, vec![vec![0, 0, 0, 4]], vec![3, 5]),
+            &internal_node(
+                next_new_root_id,
+                2,
+                vec![vec![0, 0, 0, 4]],
+                vec![3u32.into(), 5u32.into()],
+            ),
             &mut node_cache,
         );
 
         assert_node(
-            &internal_node(3, 2, vec![vec![0, 0, 0, 2]], vec![1, 2]),
+            &internal_node(
+                3u32.into(),
+                2,
+                vec![vec![0, 0, 0, 2]],
+                vec![1u32.into(), 2u32.into()],
+            ),
             &mut node_cache,
         );
 
         assert_node(
             &leaf_node(
-                1,
+                1u32.into(),
                 2,
                 vec![vec![RowCol::Int(0)], vec![RowCol::Int(1)]],
-                Some(2),
+                Some(2u32.into()),
             ),
             &mut node_cache,
         );
         assert_node(
             &leaf_node(
-                2,
+                2u32.into(),
                 2,
                 vec![vec![RowCol::Int(2)], vec![RowCol::Int(3)]],
-                Some(4),
+                Some(4u32.into()),
             ),
             &mut node_cache,
         );
 
-        assert_node(&internal_node(5, 2, vec![], vec![4]), &mut node_cache);
+        assert_node(
+            &internal_node(5u32.into(), 2, vec![], vec![4u32.into()]),
+            &mut node_cache,
+        );
 
         assert_node(
-            &leaf_node(4, 2, vec![vec![RowCol::Int(4)]], None),
+            &leaf_node(4u32.into(), 2, vec![vec![RowCol::Int(4)]], None),
             &mut node_cache,
         );
     }

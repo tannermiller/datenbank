@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
-use super::{Error, TablePageStore, TablePageStoreBuilder, TablePageStoreManager};
+use super::{Error, PageID, TablePageStore, TablePageStoreBuilder, TablePageStoreManager};
 
 #[derive(Debug)]
 pub struct Memory {
@@ -14,19 +14,19 @@ pub struct Memory {
 #[derive(Debug)]
 struct Inner {
     page_size: usize,
-    last_page: usize,
-    store: HashMap<usize, Vec<u8>>,
-    free_list: VecDeque<usize>,
+    last_page: PageID,
+    store: HashMap<PageID, Vec<u8>>,
+    free_list: VecDeque<PageID>,
 }
 
 impl Inner {
-    fn allocate(&mut self) -> Result<usize, Error> {
+    fn allocate(&mut self) -> Result<PageID, Error> {
         match self.free_list.pop_front() {
             Some(free_id) => Ok(free_id),
             None => {
                 // we've got to "allocate" the 0th page for table stuff, so the first id we return
                 // from here is at least 1
-                self.last_page += 1;
+                self.last_page.0 += 1;
                 Ok(self.last_page)
             }
         }
@@ -37,17 +37,17 @@ impl Inner {
         self.page_size
     }
 
-    fn get(&mut self, page_id: usize) -> Result<Vec<u8>, Error> {
+    fn get(&mut self, page_id: PageID) -> Result<Vec<u8>, Error> {
         match self.store.get(&page_id) {
             Some(payload) => Ok(payload.clone()),
             // 0th page is auto "allocated" and anything thats under the last page has probably
             // just been returned from the free list
-            None if page_id == 0 || page_id <= self.last_page => Ok(vec![]),
+            None if page_id.0 == 0 || page_id.0 <= self.last_page.0 => Ok(vec![]),
             None => Err(Error::UnallocatedPage(page_id)),
         }
     }
 
-    fn put(&mut self, page_id: usize, payload: Vec<u8>) -> Result<(), Error> {
+    fn put(&mut self, page_id: PageID, payload: Vec<u8>) -> Result<(), Error> {
         if page_id > self.last_page {
             return Err(Error::UnallocatedPage(page_id));
         }
@@ -61,7 +61,7 @@ impl Inner {
         Ok(())
     }
 
-    fn delete(&mut self, page_id: usize) -> Result<(), Error> {
+    fn delete(&mut self, page_id: PageID) -> Result<(), Error> {
         if page_id > self.last_page {
             return Err(Error::UnallocatedPage(page_id));
         }
@@ -78,7 +78,7 @@ impl Memory {
         Memory {
             inner: Rc::new(RefCell::new(Inner {
                 page_size,
-                last_page: 0,
+                last_page: PageID(0),
                 store: HashMap::new(),
                 free_list: VecDeque::new(),
             })),
@@ -87,7 +87,7 @@ impl Memory {
 }
 
 impl TablePageStore for Memory {
-    fn allocate(&mut self) -> Result<usize, Error> {
+    fn allocate(&mut self) -> Result<PageID, Error> {
         self.inner.borrow_mut().allocate()
     }
 
@@ -95,15 +95,15 @@ impl TablePageStore for Memory {
         self.inner.borrow().usable_page_size()
     }
 
-    fn get(&mut self, page_id: usize) -> Result<Vec<u8>, Error> {
+    fn get(&mut self, page_id: PageID) -> Result<Vec<u8>, Error> {
         self.inner.borrow_mut().get(page_id)
     }
 
-    fn put(&mut self, page_id: usize, payload: Vec<u8>) -> Result<(), Error> {
+    fn put(&mut self, page_id: PageID, payload: Vec<u8>) -> Result<(), Error> {
         self.inner.borrow_mut().put(page_id, payload)
     }
 
-    fn delete(&mut self, page_id: usize) -> Result<(), Error> {
+    fn delete(&mut self, page_id: PageID) -> Result<(), Error> {
         self.inner.borrow_mut().delete(page_id)
     }
 }
@@ -175,7 +175,7 @@ mod test {
         let mut mem = Memory::new(10);
         assert_eq!(10, mem.usable_page_size());
 
-        fn check(mem: &mut Memory, page_id: usize) {
+        fn check(mem: &mut Memory, page_id: PageID) {
             // this page exists, but is empty
             assert_eq!(Vec::<u8>::new(), mem.get(page_id).unwrap());
 
@@ -195,26 +195,26 @@ mod test {
         }
 
         // check 0th page is already setup for operation
-        check(&mut mem, 0);
+        check(&mut mem, PageID(0));
 
         // create a new page and verify
-        assert_eq!(Err(Error::UnallocatedPage(1)), mem.get(1));
-        assert_eq!(Ok(1), mem.allocate());
-        check(&mut mem, 1);
+        assert_eq!(Err(Error::UnallocatedPage(PageID(1))), mem.get(PageID(1)));
+        assert_eq!(Ok(PageID(1)), mem.allocate());
+        check(&mut mem, PageID(1));
 
         // delete the most recent page and ensure we get it back on re-allocation
-        assert!(mem.delete(1).is_ok());
-        assert_eq!(Ok(1), mem.allocate());
-        check(&mut mem, 1);
+        assert!(mem.delete(PageID(1)).is_ok());
+        assert_eq!(Ok(PageID(1)), mem.allocate());
+        check(&mut mem, PageID(1));
 
         // ok, now allocate a brand new page
-        assert_eq!(Ok(2), mem.allocate());
-        check(&mut mem, 2);
+        assert_eq!(Ok(PageID(2)), mem.allocate());
+        check(&mut mem, PageID(2));
 
         // delete the first page again and verify we get it again from the free list and not
         // allocate an entirely new page
-        assert!(mem.delete(1).is_ok());
-        assert_eq!(Ok(1), mem.allocate());
-        check(&mut mem, 1);
+        assert!(mem.delete(PageID(1)).is_ok());
+        assert_eq!(Ok(PageID(1)), mem.allocate());
+        check(&mut mem, PageID(1));
     }
 }

@@ -11,7 +11,7 @@ use super::btree::{decode as decode_btree, BTree};
 use super::Error;
 use crate::cache::Cache;
 use crate::encode::{write_len, write_len_and_bytes};
-use crate::pagestore::{TablePageStore, TablePageStoreBuilder};
+use crate::pagestore::{PageID, TablePageStore, TablePageStoreBuilder};
 use crate::parser::identifier_bytes;
 use crate::schema::{decode as decode_schema, Schema};
 
@@ -110,8 +110,8 @@ fn decode_parse(
         String,
         Schema,
         usize,
-        Option<usize>,
-        Vec<(usize, Option<usize>)>,
+        Option<PageID>,
+        Vec<(usize, Option<PageID>)>,
     ),
 > {
     let (rest, (table_name, schema, (order, root), secondaries)) = tuple((

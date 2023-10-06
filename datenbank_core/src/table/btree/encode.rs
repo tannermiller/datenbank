@@ -6,7 +6,7 @@ use nom::sequence::pair;
 use nom::IResult;
 
 use super::BTree;
-use crate::pagestore::TablePageStore;
+use crate::pagestore::{PageID, TablePageStore};
 
 // The encoding for a BTree is just:
 //   - the order encoded as 4 byte integer
@@ -18,17 +18,17 @@ pub fn encode<S: TablePageStore>(tree: &BTree<S>) -> Vec<u8> {
         .write_all(&(tree.order as u32).to_be_bytes())
         .expect("can't fail writing to vec");
     bytes
-        .write_all(&(tree.root.unwrap_or_else(|| 0) as u32).to_be_bytes())
+        .write_all(&tree.root.unwrap_or_else(|| 0u32.into()).to_be_bytes())
         .expect("can't fail writing to vec");
     bytes
 }
 
-pub fn decode(input: &[u8]) -> IResult<&[u8], (usize, Option<usize>)> {
+pub fn decode(input: &[u8]) -> IResult<&[u8], (usize, Option<PageID>)> {
     pair(
         map(be_u32, |order| order as usize),
         map(be_u32, |rid| match rid {
             0 => None,
-            n => Some(n as usize),
+            n => Some(n.into()),
         }),
     )(input)
 }
@@ -57,7 +57,7 @@ mod test {
             name: "something".to_string().into(),
             schema: Schema::new(vec![], None, vec![]).unwrap(),
             order: 1000,
-            root: Some(7),
+            root: Some(7u32.into()),
             node_cache: Cache::new(store_builder.build().unwrap()),
             data_cache: Cache::new(store_builder.build().unwrap()),
             store: store_builder.build().unwrap(),

@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::cache::{Cache, Error as CacheError};
-use crate::pagestore::{Error as PageError, TablePageStore, TablePageStoreBuilder};
+use crate::pagestore::{Error as PageError, PageID, TablePageStore, TablePageStoreBuilder};
 use crate::row::{Error as RowError, Predicate};
 use crate::schema::{Column, Schema};
 use node::{Internal, Leaf, Node, NodeBody};
@@ -34,7 +34,7 @@ pub struct BTree<S: TablePageStore> {
     pub(crate) schema: Schema,
     // the order or branching factor of the B+ Tree
     pub(crate) order: usize,
-    pub(crate) root: Option<usize>,
+    pub(crate) root: Option<PageID>,
     pub(crate) node_cache: Cache<S, Node>,
     pub(crate) data_cache: Cache<S, Vec<u8>>,
     pub(crate) store: S,
@@ -117,7 +117,7 @@ impl<S: TablePageStore> BTree<S> {
 
     // find the leaf that either contains a key or should be the leaf into which the key would be
     // inserted
-    fn find_containing_leaf(&mut self, key_id: &Vec<u8>) -> Result<(usize, Vec<usize>), Error> {
+    fn find_containing_leaf(&mut self, key_id: &Vec<u8>) -> Result<(PageID, Vec<PageID>), Error> {
         let mut node_id = match self.root {
             Some(root_id) => root_id,
             None => return Err(Error::EmptyTable),
@@ -197,10 +197,10 @@ mod test {
     use crate::schema::ColumnType;
 
     pub(crate) fn leaf_node(
-        id: usize,
+        id: PageID,
         order: usize,
         row_data: Vec<Vec<RowCol>>,
-        right_sibling: Option<usize>,
+        right_sibling: Option<PageID>,
     ) -> Node {
         Node {
             id,
@@ -213,10 +213,10 @@ mod test {
     }
 
     pub(crate) fn internal_node(
-        id: usize,
+        id: PageID,
         order: usize,
         boundary_keys: Vec<Vec<u8>>,
-        children: Vec<usize>,
+        children: Vec<PageID>,
     ) -> Node {
         Node {
             id,

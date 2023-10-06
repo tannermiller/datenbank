@@ -2,7 +2,7 @@ use std::collections::hash_map;
 use std::collections::{HashMap, HashSet};
 use std::mem;
 
-use crate::pagestore::{Error as PageError, TablePageStore};
+use crate::pagestore::{Error as PageError, PageID, TablePageStore};
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
@@ -41,11 +41,11 @@ impl<P: Page> Wrapper<P> {
 
 #[derive(Debug)]
 pub struct Cache<S: TablePageStore, P: Page> {
-    cache: HashMap<usize, Wrapper<P>>,
+    cache: HashMap<PageID, Wrapper<P>>,
     store: S,
 
     // the allocated, but not inserted page ids
-    allocated: HashSet<usize>,
+    allocated: HashSet<PageID>,
 }
 
 impl<S: TablePageStore, P: Page> Cache<S, P> {
@@ -57,7 +57,7 @@ impl<S: TablePageStore, P: Page> Cache<S, P> {
         }
     }
 
-    pub(crate) fn get_mut(&mut self, page_id: usize) -> Result<&mut P, Error> {
+    pub(crate) fn get_mut(&mut self, page_id: PageID) -> Result<&mut P, Error> {
         if let hash_map::Entry::Vacant(e) = self.cache.entry(page_id) {
             let page_data = self.store.get(page_id)?;
             let page = P::decode(&page_data)?;
@@ -75,19 +75,19 @@ impl<S: TablePageStore, P: Page> Cache<S, P> {
         Ok(&mut wrapper.data)
     }
 
-    pub(crate) fn allocate(&mut self) -> Result<usize, Error> {
+    pub(crate) fn allocate(&mut self) -> Result<PageID, Error> {
         let page_id = self.store.allocate()?;
         self.allocated.insert(page_id);
         Ok(page_id)
     }
 
-    pub(crate) fn put(&mut self, page_id: usize, data: P) -> Result<(), Error> {
+    pub(crate) fn put(&mut self, page_id: PageID, data: P) -> Result<(), Error> {
         self.allocated.remove(&page_id);
         self.cache.insert(page_id, Wrapper::new_mutated(data));
         Ok(())
     }
 
-    pub(crate) fn get(&mut self, page_id: usize) -> Result<&P, Error> {
+    pub(crate) fn get(&mut self, page_id: PageID) -> Result<&P, Error> {
         if let hash_map::Entry::Vacant(e) = self.cache.entry(page_id) {
             let data = self.store.get(page_id)?;
             let page = P::decode(&data)?;
@@ -139,10 +139,10 @@ mod test {
         let mut store_builder = MemoryManager::new(64 * 1024).builder("test").unwrap();
         let mut cache: Cache<Memory, Vec<u8>> = Cache::new(store_builder.build().unwrap());
 
-        assert!(cache.get(1).is_err());
+        assert!(cache.get(1u32.into()).is_err());
 
         let first_page = cache.allocate().unwrap();
-        assert_eq!(1, first_page);
+        assert_eq!(<u32 as std::convert::Into<PageID>>::into(1u32), first_page);
         assert!(cache.allocated.contains(&first_page));
 
         cache

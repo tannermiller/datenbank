@@ -64,7 +64,10 @@ impl<S: TablePageStore> Table<S> {
             })
             .collect::<Result<Vec<BTree<S>>, Error>>()?;
 
-        store.put(0, header::encode(&name, &schema, &primary, &secondaries))?;
+        store.put(
+            0u32.into(),
+            header::encode(&name, &schema, &primary, &secondaries),
+        )?;
 
         Ok(Table {
             name,
@@ -80,7 +83,7 @@ impl<S: TablePageStore> Table<S> {
         store_builder: &mut SB,
     ) -> Result<Option<Table<S>>, Error> {
         let mut store = store_builder.build()?;
-        let header_page = store.get(0)?;
+        let header_page = store.get(0u32.into())?;
         if header_page.is_empty() {
             return Ok(None);
         }
@@ -131,7 +134,7 @@ impl<S: TablePageStore> Table<S> {
 
         if root_updated {
             self.store.put(
-                0,
+                0u32.into(),
                 header::encode(&self.name, &self.schema, &self.primary, &self.secondaries),
             )?;
         }
@@ -230,7 +233,9 @@ mod test {
     use super::btree::node::encode::decode_node;
     use super::btree::node::NodeBody;
     use super::*;
-    use crate::pagestore::{Memory, MemoryManager, TablePageStoreBuilder, TablePageStoreManager};
+    use crate::pagestore::{
+        Memory, MemoryManager, PageID, TablePageStoreBuilder, TablePageStoreManager,
+    };
     use crate::row::AllRows;
     use crate::schema::{ColumnType, Schema};
 
@@ -263,7 +268,7 @@ mod test {
             assert_eq!(&schema, &table.schema);
 
             let mut store = store_builder.build().unwrap();
-            let table_header_page = store.get(0).unwrap();
+            let table_header_page = store.get(0u32.into()).unwrap();
             assert_eq!(
                 vec![
                     18, 98, 97, 98, 105, 101, 115, 95, 102, 105, 114, 115, 116, 95, 116, 97, 98,
@@ -327,7 +332,7 @@ mod test {
 
         let mut store = store_builder.build().unwrap();
         let root_id = {
-            let table_header_page = store.get(0).unwrap();
+            let table_header_page = store.get(0u32.into()).unwrap();
             let (_, _, decoded_btree, _) =
                 header::decode(&table_header_page, &mut store_builder).unwrap();
             decoded_btree.root.unwrap()
@@ -347,7 +352,7 @@ mod test {
         );
     }
 
-    fn load_root_leaf_and_check_rows(store: &mut Memory, root: usize, exp_rows: Vec<Vec<RowCol>>) {
+    fn load_root_leaf_and_check_rows(store: &mut Memory, root: PageID, exp_rows: Vec<Vec<RowCol>>) {
         let index_node_bytes = store.get(root).unwrap();
         let root_node = decode_node(&index_node_bytes).unwrap();
         let leaf = match root_node.body {
@@ -397,7 +402,7 @@ mod test {
         assert_eq!(1, rows_affected);
 
         let mut store = store_builder.build().unwrap();
-        let table_header_page = store.get(0).unwrap();
+        let table_header_page = store.get(0u32.into()).unwrap();
         let (_, _, primary, secondaries) =
             header::decode(&table_header_page, &mut store_builder).unwrap();
 
@@ -473,7 +478,7 @@ mod test {
 
         let mut store = store_builder.build().unwrap();
         let root_id = {
-            let table_header_page = store.get(0).unwrap();
+            let table_header_page = store.get(0u32.into()).unwrap();
             let (_, _, decoded_btree, _) =
                 header::decode(&table_header_page, &mut store_builder).unwrap();
             decoded_btree.root.unwrap()

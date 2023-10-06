@@ -59,10 +59,10 @@ fn encode_row_bytes(bytes: &mut Vec<u8>, RowBytes { inline, next_page }: &RowByt
     // finally write out the next page, or 0 if no next page
     let next_page = match next_page {
         Some(np) => *np,
-        None => 0,
+        None => 0u32.into(),
     };
     bytes
-        .write_all(&(next_page as u32).to_be_bytes())
+        .write_all(&next_page.to_be_bytes())
         .expect("can't fail writing to vec");
 }
 
@@ -101,7 +101,7 @@ fn decode_row_bytes(input: &[u8]) -> IResult<&[u8], RowBytes> {
     let next_page = if next_page == 0 {
         None
     } else {
-        Some(next_page as usize)
+        Some(next_page.into())
     };
 
     Ok((
@@ -136,7 +136,7 @@ mod test {
                 RowCol::Bool(true),
                 RowCol::VarChar(RowBytes {
                     inline: b"Hello, World!".to_vec(),
-                    next_page: Some(11),
+                    next_page: Some(11u32.into()),
                 }),
                 RowCol::VarChar(RowBytes {
                     inline: b"I'm different".to_vec(),
@@ -146,7 +146,7 @@ mod test {
                 RowCol::Int(8),
                 RowCol::LongBlob(RowBytes {
                     inline: b"Hello, Blob!".to_vec(),
-                    next_page: Some(11),
+                    next_page: Some(11u32.into()),
                 }),
                 RowCol::LongBlob(RowBytes {
                     inline: b"I'm blobin' different".to_vec(),

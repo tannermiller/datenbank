@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::cache::{Cache, Error as CacheError};
 use crate::key;
-use crate::pagestore::TablePageStore;
+use crate::pagestore::{PageID, TablePageStore};
 use crate::schema::Error as SchemaError;
 use crate::schema::{Column, Schema, MAX_INLINE_VAR_LEN_COL_SIZE};
 
@@ -36,7 +36,7 @@ pub enum RowCol {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RowBytes {
     pub(crate) inline: Vec<u8>,
-    pub(crate) next_page: Option<usize>,
+    pub(crate) next_page: Option<PageID>,
 }
 
 impl Row {
@@ -112,7 +112,7 @@ fn load_full_row_bytes<S: TablePageStore>(
             data.extend(&rb_page[4..]);
 
             if next_pointer != 0 {
-                data_page_id = next_pointer as usize;
+                data_page_id = next_pointer.into();
             } else {
                 break;
             }
@@ -151,9 +151,9 @@ impl ProcessedRow {
 
             let page_ids = (0..data_pages.len())
                 .map(|_| cache.allocate().map_err(Into::into))
-                .collect::<Result<Vec<usize>, Error>>()?;
+                .collect::<Result<Vec<PageID>, Error>>()?;
             let first_next_page = page_ids[0];
-            let mut next_page_ids: Vec<Option<usize>> =
+            let mut next_page_ids: Vec<Option<PageID>> =
                 page_ids.iter().skip(1).map(|pg_id| Some(*pg_id)).collect();
             next_page_ids.push(None);
 
@@ -165,7 +165,7 @@ impl ProcessedRow {
                     Some(page_id) => {
                         page_to_write.push(1);
                         page_to_write
-                            .write_all(&(page_id as u32).to_be_bytes())
+                            .write_all(&page_id.to_be_bytes())
                             .expect("can't fail writing to vec");
                     }
                     None => {
@@ -397,11 +397,11 @@ mod test {
                     RowCol::Bool(true),
                     RowCol::VarChar(RowBytes {
                         inline: base_str.as_bytes().to_vec(),
-                        next_page: Some(1),
+                        next_page: Some(1u32.into()),
                     }),
                     RowCol::LongBlob(RowBytes {
                         inline: base_blob,
-                        next_page: Some(5),
+                        next_page: Some(5u32.into()),
                     }),
                 ],
             },
@@ -410,20 +410,23 @@ mod test {
 
         // ensure that the 8 pages were allocated by seeing the next allocated one is 9
         let mut store = store_builder.build().unwrap();
-        assert_eq!(9, store.allocate().unwrap());
+        assert_eq!(PageID::from(9u32), store.allocate().unwrap());
         assert_eq!(
             &vec![1u8, 0, 0, 0, 2, 48, 49, 50],
-            data_cache.get(1).unwrap()
+            data_cache.get(1u32.into()).unwrap()
         );
         assert_eq!(
             &vec![1u8, 0, 0, 0, 3, 51, 52, 53],
-            data_cache.get(2).unwrap()
+            data_cache.get(2u32.into()).unwrap()
         );
         assert_eq!(
             &vec![1u8, 0, 0, 0, 4, 54, 55, 56],
-            data_cache.get(3).unwrap()
+            data_cache.get(3u32.into()).unwrap()
         );
-        assert_eq!(&vec![0u8, 0, 0, 0, 1, 57], data_cache.get(4).unwrap());
+        assert_eq!(
+            &vec![0u8, 0, 0, 0, 1, 57],
+            data_cache.get(4u32.into()).unwrap()
+        );
     }
 
     #[test]

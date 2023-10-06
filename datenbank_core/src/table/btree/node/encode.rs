@@ -21,7 +21,7 @@ pub(crate) fn encode_node(node: &Node) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(body_bytes.len() + 4 + 4 + 1);
 
     bytes
-        .write_all(&(node.id as u32).to_be_bytes())
+        .write_all(&node.id.to_be_bytes())
         .expect("can't fail writing to vec");
 
     bytes
@@ -64,7 +64,7 @@ fn inner_decode_node(input: &[u8]) -> IResult<&[u8], Node> {
     Ok((
         input,
         Node {
-            id: id as usize,
+            id: id.into(),
             order: order as usize,
             body,
         },
@@ -78,7 +78,7 @@ fn decode_leaf(input: &[u8]) -> IResult<&[u8], NodeBody> {
     let right_sibling = if right_sibling == 0 {
         None
     } else {
-        Some(right_sibling as usize)
+        Some(right_sibling.into())
     };
 
     Ok((
@@ -98,7 +98,7 @@ fn decode_internal(input: &[u8]) -> IResult<&[u8], NodeBody> {
         .collect::<Vec<Vec<u8>>>();
 
     let (input, children) = length_count(be_u32, be_u32)(input)?;
-    let children = children.into_iter().map(|c| c as usize).collect();
+    let children = children.into_iter().map(Into::into).collect();
 
     Ok((
         input,
@@ -131,10 +131,10 @@ fn encode_leaf(
 
     let rs_encoded = match right_sibling {
         Some(rs) => *rs,
-        None => 0,
+        None => 0u32.into(),
     };
     bytes
-        .write_all(&(rs_encoded as u32).to_be_bytes())
+        .write_all(&rs_encoded.to_be_bytes())
         .expect("can't fail writing to vec");
 
     bytes
@@ -165,7 +165,7 @@ fn encode_internal(
 
     for c in children {
         bytes
-            .write_all(&(*c as u32).to_be_bytes())
+            .write_all(&c.to_be_bytes())
             .expect("can't fail writing to vec");
     }
 
@@ -189,7 +189,7 @@ mod test {
     #[test]
     fn test_encode_decode_leaf() {
         let leaf_node = Node {
-            id: 7,
+            id: 7u32.into(),
             order: 10,
             body: NodeBody::Leaf(Leaf {
                 rows: vec![Row {
@@ -198,15 +198,15 @@ mod test {
                         RowCol::Bool(true),
                         RowCol::VarChar(RowBytes {
                             inline: b"Hello, World!".to_vec(),
-                            next_page: Some(11),
+                            next_page: Some(11u32.into()),
                         }),
                         RowCol::LongBlob(RowBytes {
                             inline: b"foo bar baz".to_vec(),
-                            next_page: Some(12),
+                            next_page: Some(12u32.into()),
                         }),
                     ],
                 }],
-                right_sibling: Some(11),
+                right_sibling: Some(11u32.into()),
             }),
         };
 
@@ -219,11 +219,11 @@ mod test {
     #[test]
     fn test_encode_decode_internal() {
         let internal_node = Node {
-            id: 7,
+            id: 7u32.into(),
             order: 10,
             body: NodeBody::Internal(Internal {
                 boundary_keys: vec![b"hello".to_vec(), b"world".to_vec()],
-                children: vec![5, 7, 11],
+                children: vec![5u32.into(), 7u32.into(), 11u32.into()],
             }),
         };
 

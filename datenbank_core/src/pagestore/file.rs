@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use super::{Error, TablePageStore, TablePageStoreBuilder, TablePageStoreManager};
+use super::{Error, PageID, TablePageStore, TablePageStoreBuilder, TablePageStoreManager};
 
 // File maintains the second page (that is the 1st, since 0-indexed) to hold the initial free list.
 // The free list contains all the page ids, as big-endian u32s which have been allocated in the
@@ -27,11 +27,11 @@ pub struct File {
 }
 
 impl TablePageStore for File {
-    fn allocate(&mut self) -> Result<usize, Error> {
+    fn allocate(&mut self) -> Result<PageID, Error> {
         // Seek to end, get final position, divide by page_size to get current page_count,
         // write out a new page of zeroes
 
-        let mut current_free_list_page = 1;
+        let mut current_free_list_page = PageID(1);
         let mut previous_free_list_page = None;
         loop {
             let mut free_list_page = self.get(current_free_list_page)?;
@@ -47,7 +47,7 @@ impl TablePageStore for File {
             // that since we pop off the back of the free list
             if next_page_pointer != 0 {
                 previous_free_list_page = Some(current_free_list_page);
-                current_free_list_page = next_page_pointer as usize;
+                current_free_list_page = next_page_pointer.into();
                 continue;
             }
 
@@ -82,7 +82,7 @@ impl TablePageStore for File {
             free_list_page.splice(4..8, (list_len - 1).to_be_bytes());
             self.put(current_free_list_page, free_list_page)?;
 
-            return Ok(page_id as usize);
+            return Ok(page_id.into());
         }
 
         // if we made it past the loop, then we need to actually allocate a new page
@@ -99,7 +99,7 @@ impl TablePageStore for File {
             .write_all(&vec![0; self.page_size as usize])
             .map_err(|e| Error::Io(e.to_string()))?;
 
-        Ok(page_count as usize)
+        Ok(PageID(page_count as usize))
     }
 
     fn usable_page_size(&self) -> usize {
@@ -108,8 +108,9 @@ impl TablePageStore for File {
         (self.page_size - 4) as usize
     }
 
-    fn get(&mut self, page_id: usize) -> Result<Vec<u8>, Error> {
-        let start_position = page_id as u64 * (self.page_size as u64);
+    fn get(&mut self, page_id: PageID) -> Result<Vec<u8>, Error> {
+        let PageID(pid) = page_id;
+        let start_position = pid as u64 * (self.page_size as u64);
 
         let total_size = self
             .file
@@ -142,7 +143,7 @@ impl TablePageStore for File {
         Ok(page_data)
     }
 
-    fn put(&mut self, page_id: usize, mut payload: Vec<u8>) -> Result<(), Error> {
+    fn put(&mut self, page_id: PageID, mut payload: Vec<u8>) -> Result<(), Error> {
         if payload.len() > self.usable_page_size() {
             return Err(Error::PayloadTooLong(
                 payload.len(),
@@ -150,7 +151,8 @@ impl TablePageStore for File {
             ));
         }
 
-        let start_position = page_id as u64 * (self.page_size as u64);
+        let PageID(pid) = page_id;
+        let start_position = pid as u64 * (self.page_size as u64);
 
         let file_len = self
             .file
@@ -181,7 +183,7 @@ impl TablePageStore for File {
             .map_err(|e| Error::Io(e.to_string()))
     }
 
-    fn delete(&mut self, page_id: usize) -> Result<(), Error> {
+    fn delete(&mut self, page_id: PageID) -> Result<(), Error> {
         // On delete, we need to zero our the page and then add it to the free list. In order to
         // add to the free list, we start at the first free list page (index 1) and follow the
         // linked list of free list page nodes to the last one. We add this page id to the last
@@ -189,7 +191,7 @@ impl TablePageStore for File {
         // empty free list and the previous free list page has its pointer rewritten to point at
         // this page.
 
-        let mut current_free_list_page = 1;
+        let mut current_free_list_page = PageID(1);
         loop {
             let mut free_list_page = self.get(current_free_list_page)?;
 
@@ -201,7 +203,7 @@ impl TablePageStore for File {
                 let mut free_list_page = Vec::with_capacity(12);
                 free_list_page.extend(0u32.to_be_bytes());
                 free_list_page.extend(1u32.to_be_bytes());
-                free_list_page.extend((page_id as u32).to_be_bytes());
+                free_list_page.extend(page_id.to_be_bytes());
 
                 self.put(current_free_list_page, free_list_page)?;
                 return Ok(());
@@ -210,7 +212,7 @@ impl TablePageStore for File {
             let next_page_pointer = read_u32_from_slice(&free_list_page[..4])?;
             if next_page_pointer != 0 {
                 // head on to the next page
-                current_free_list_page = next_page_pointer as usize;
+                current_free_list_page = next_page_pointer.into();
                 continue;
             }
 
@@ -218,14 +220,14 @@ impl TablePageStore for File {
             let max_page_count = (self.usable_page_size() - 8) / 4;
             if list_len as usize == max_page_count {
                 // this page is full, we need to make the deleted page a new free list page
-                free_list_page.splice(..4, (page_id as u32).to_be_bytes());
+                free_list_page.splice(..4, page_id.to_be_bytes());
                 self.put(current_free_list_page, free_list_page)?;
                 self.put(page_id, vec![0, 0, 0, 0, 0, 0, 0, 0])?;
                 return Ok(());
             }
 
             // ok, we're sticking it in this page as we've got space in it
-            free_list_page.extend((page_id as u32).to_be_bytes());
+            free_list_page.extend(page_id.to_be_bytes());
             free_list_page.splice(4..8, (list_len + 1).to_be_bytes());
             self.put(current_free_list_page, free_list_page)?;
 
@@ -334,33 +336,35 @@ mod test {
         let mut file_manager = FileManager::new(temp_dir, 16 * 1024);
         let mut store = file_manager.builder(table_name).unwrap().build().unwrap();
         let next_page = store.allocate().unwrap();
-        assert_eq!(2, next_page);
+        assert_eq!(PageID(2), next_page);
 
         let page_data = store.get(next_page).unwrap();
         assert!(page_data.is_empty());
         assert_eq!(
-            Err(Error::UnallocatedPage(next_page + 2)),
-            store.get(next_page + 2)
+            Err(Error::UnallocatedPage(PageID(next_page.0 + 2))),
+            store.get(PageID(next_page.0 + 2))
         );
 
-        store.put(0, b"some header data".to_vec()).unwrap();
+        store
+            .put(0u32.into(), b"some header data".to_vec())
+            .unwrap();
         store
             .put(next_page, b"gonna put something here too".to_vec())
             .unwrap();
 
         assert_eq!(
-            Err(Error::UnallocatedPage(next_page + 2)),
-            store.put(next_page + 2, vec![1, 0]),
+            Err(Error::UnallocatedPage(PageID(next_page.0 + 2))),
+            store.put(PageID(next_page.0 + 2), vec![1, 0]),
         );
 
-        let page_data = store.get(0).unwrap();
+        let page_data = store.get(0u32.into()).unwrap();
         assert_eq!(b"some header data".as_slice(), &page_data);
 
         let page_data = store.get(next_page).unwrap();
         assert_eq!(b"gonna put something here too".as_slice(), &page_data);
 
         let another_page = store.allocate().unwrap();
-        assert_eq!(3, another_page);
+        assert_eq!(PageID(3), another_page);
         store
             .put(another_page, b"I'm hereeeeeeee".to_vec())
             .unwrap();
@@ -405,15 +409,15 @@ mod test {
         let count = 10000;
 
         for i in 0..count {
-            assert_eq!(i + 2, store.allocate().unwrap());
+            assert_eq!(PageID(i + 2), store.allocate().unwrap());
         }
 
         for i in 0..count {
-            store.delete(i + 2).unwrap();
+            store.delete(PageID(i + 2)).unwrap();
         }
 
         for i in (0..count).rev() {
-            assert_eq!(i + 2, store.allocate().unwrap());
+            assert_eq!(PageID(i + 2), store.allocate().unwrap());
         }
 
         let _ = fs::remove_file(db_file_path);

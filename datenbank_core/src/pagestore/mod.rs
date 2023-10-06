@@ -11,7 +11,34 @@ pub enum Error {
     #[error("provided payload len {0} is larger than the page size {1}")]
     PayloadTooLong(usize, usize),
     #[error("provided page id has not been allocated yet: {0}")]
-    UnallocatedPage(usize),
+    UnallocatedPage(PageID),
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd)]
+pub struct PageID(usize);
+
+impl PageID {
+    pub const fn to_be_bytes(self) -> [u8; 4] {
+        (self.0 as u32).to_be_bytes()
+    }
+}
+
+impl From<u32> for PageID {
+    fn from(pid: u32) -> PageID {
+        PageID(pid as usize)
+    }
+}
+
+impl From<usize> for PageID {
+    fn from(pid: usize) -> PageID {
+        PageID(pid)
+    }
+}
+
+impl std::fmt::Display for PageID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.0)
+    }
 }
 
 // TablePageStore is responsible for maintaining the persistence of data pages in persistence. This
@@ -21,7 +48,7 @@ pub enum Error {
 // time. That 0th page will be used for table header information and not for table content.
 pub trait TablePageStore: std::fmt::Debug {
     // Allocate and prepare a new page in persistence, returning the page id.
-    fn allocate(&mut self) -> Result<usize, Error>;
+    fn allocate(&mut self) -> Result<PageID, Error>;
 
     // Return the maximum usable size for each page. This may be less than the page size provided
     // to construct this store as each implementation may reserve some bytes to act as an
@@ -30,14 +57,14 @@ pub trait TablePageStore: std::fmt::Debug {
 
     // Get a page given a page id. The page id must be one that has already been allocated, if not
     // an Err(Error::UnallocatedPage) error will be returned.
-    fn get(&mut self, page_id: usize) -> Result<Vec<u8>, Error>;
+    fn get(&mut self, page_id: PageID) -> Result<Vec<u8>, Error>;
 
     // Write a page's payload to persistence. An Err(Error::PayloadTooLong) will be returned if the
     // payload.
-    fn put(&mut self, page_id: usize, payload: Vec<u8>) -> Result<(), Error>;
+    fn put(&mut self, page_id: PageID, payload: Vec<u8>) -> Result<(), Error>;
 
     // Delete the contents of the page and free it for reuse/deallocation.
-    fn delete(&mut self, page_id: usize) -> Result<(), Error>;
+    fn delete(&mut self, page_id: PageID) -> Result<(), Error>;
 }
 
 pub trait TablePageStoreBuilder: std::fmt::Debug {

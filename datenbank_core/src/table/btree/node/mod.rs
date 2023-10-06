@@ -1,6 +1,7 @@
 use super::Error;
 use crate::cache::{Error as CacheError, Page};
 use crate::key;
+use crate::pagestore::PageID;
 use crate::row::Row;
 use crate::schema::Schema;
 
@@ -11,14 +12,14 @@ pub(crate) mod encode;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Node {
     // The ID of this node acts as the key we use to store it with.
-    pub(crate) id: usize,
+    pub(crate) id: PageID,
     // the order or branching factor of this B+ Tree
     pub(crate) order: usize,
     pub(crate) body: NodeBody,
 }
 
 impl Node {
-    pub(crate) fn new_leaf(id: usize, order: usize) -> Node {
+    pub(crate) fn new_leaf(id: PageID, order: usize) -> Node {
         Node {
             id,
             order,
@@ -55,7 +56,7 @@ pub(crate) enum NodeBody {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Internal {
     pub(crate) boundary_keys: Vec<Vec<u8>>,
-    pub(crate) children: Vec<usize>,
+    pub(crate) children: Vec<PageID>,
 }
 
 impl Internal {
@@ -64,7 +65,7 @@ impl Internal {
     pub(crate) fn insert_child(
         &mut self,
         order: usize,
-        child_id: usize,
+        child_id: PageID,
         child_key: Vec<u8>,
     ) -> Result<Option<(Vec<u8>, NodeBody)>, Error> {
         if self.children.len() < order {
@@ -131,7 +132,7 @@ pub(crate) struct Leaf {
     // the actual row data for this leaf node
     pub(crate) rows: Vec<Row>,
     // the leaf node to the right of this one, used for table scans
-    pub(crate) right_sibling: Option<usize>,
+    pub(crate) right_sibling: Option<PageID>,
 }
 
 impl Leaf {
