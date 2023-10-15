@@ -41,6 +41,14 @@ impl std::fmt::Display for PageID {
     }
 }
 
+pub struct AllocationState {
+    // The maximum allocated page id.
+    pub maximum_id: PageID,
+
+    // The set of allocated pages that do not currently have any stored data and may be re-used.
+    pub free_list: Vec<PageID>,
+}
+
 // TablePageStore is responsible for maintaining the persistence of data pages in persistence. This
 // trait is a per-table resource, including any indices on that table. A page size will also be
 // associated with this store and can not be changed after it has been established. Each
@@ -49,6 +57,9 @@ impl std::fmt::Display for PageID {
 pub trait TablePageStore: std::fmt::Debug {
     // Allocate and prepare a new page in persistence, returning the page id.
     fn allocate(&mut self) -> Result<PageID, Error>;
+
+    // Return the current inner state of the page allocations.
+    fn allocation_state(&mut self) -> Result<AllocationState, Error>;
 
     // Return the maximum usable size for each page. This may be less than the page size provided
     // to construct this store as each implementation may reserve some bytes to act as an

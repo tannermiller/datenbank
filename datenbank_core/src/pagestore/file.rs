@@ -2,7 +2,9 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use super::{Error, PageID, TablePageStore, TablePageStoreBuilder, TablePageStoreManager};
+use super::{
+    AllocationState, Error, PageID, TablePageStore, TablePageStoreBuilder, TablePageStoreManager,
+};
 
 // File maintains the second page (that is the 1st, since 0-indexed) to hold the initial free list.
 // The free list contains all the page ids, as big-endian u32s which have been allocated in the
@@ -25,6 +27,29 @@ pub struct File {
     page_size: u32,
     file: fs::File,
 }
+
+// WAL Allocation Strategy:
+//
+// Initially, we'll see that the AllocationStatus.maximum_id is 1 as that accounts for the table
+// header (page 0) and the initially empty free list (page 1) and the free list is empty. On
+// database startup the free list and current maximum page id will be read for each table and kept
+// in memory in the WAL. Then the uncheckpointed WAL entries will be read and any pages that are
+// written to will be removed from the in-memory free list if they are on there and kept in a
+// reused free list. In addition if any page written is beyond the persisted maximum page id, then
+// that will be set to the highest page id found in WAL entries. When a transaction requires a new
+// page to be allocated, the WAL will first check the in-memory free list and if there are page ids
+// stored on there then the last one will be popped off the free list and used for the new data
+// page. That page id will also be stored in the removed list.If the free list is empty then the
+// in-memory maximum page id will be bumped by 1 and that new value will be used as the allocated
+// page id. When checkpointing a transaction from the WAL into the table file, if a file is in the
+// persisted free list but is written to then it will be removed from the persisted free list
+// before writing the page to the table. Also, if the maximum id of the pages in the transaction is
+// above the persisted maximum id then new pages will be allocated up to that maximum id. In the
+// case where a transaction deletes a page, then a special entry in the WAL will be added which
+// contains the page ids of any deleted pages. These will be added to the in-memory free list so
+// they could be re-used in the next transaction that allocates. At checkpoint time, if the
+// deleted page id is still considered deleted then it will be deleted in the persistent table file
+// and added to the persistent free list.
 
 impl TablePageStore for File {
     fn allocate(&mut self) -> Result<PageID, Error> {
@@ -100,6 +125,69 @@ impl TablePageStore for File {
             .map_err(|e| Error::Io(e.to_string()))?;
 
         Ok(PageID(page_count as usize))
+    }
+
+    fn allocation_state(&mut self) -> Result<AllocationState, Error> {
+        let mut free_list = Vec::new();
+
+        let mut current_free_list_page = PageID(1);
+        loop {
+            let free_list_page = self.get(current_free_list_page)?;
+            if free_list_page.len() < 8 {
+                // Somethings messed up with the free list page, just break and return what we've
+                // got.
+                break;
+            }
+
+            let list_len = read_u32_from_slice(&free_list_page[4..8])?;
+
+            // If the list len is zero, then we're in the weird situation where we can't unfree
+            // this page, because then we'd need another free list page to hold this unfreed page.
+            // To sidestep that whole problem we add this page to the end of our free list and will
+            // use it first when we next allocate. We'll also remove the next page pointer that
+            // points at this page then. Also, we don't do that if this is the initial free list
+            // page.
+            if list_len == 0 && current_free_list_page != PageID(1) {
+                free_list.push(current_free_list_page);
+                break;
+            }
+
+            // iterate through the free pages and add them to the free list
+            for i in 0..(list_len as usize) {
+                let start = 8 + i;
+                let end = start + 4;
+                let page_id = read_u32_from_slice(&free_list_page[start..end])?;
+                free_list.push(page_id.into())
+            }
+
+            let next_page_pointer = read_u32_from_slice(&free_list_page[..4])?;
+            if next_page_pointer == 0 {
+                // If the next page pointer is 0 then that means we're on the last page so we can
+                // break the loop here.
+                break;
+            }
+
+            // if the next page pointer isn't zero, then there's another page out there, iterate to
+            // that since we pop off the back of the free list
+            current_free_list_page = next_page_pointer.into();
+        }
+
+        // now we must find the maximum allocated page id.
+        let position = self
+            .file
+            .seek(SeekFrom::End(0))
+            .map_err(|e| Error::Io(e.to_string()))?;
+
+        // This will give us the total written pages up to now. Since the pages are 0-indexed this
+        // will actually also be the returned index for the next page so the maximum id is 1 less
+        // than this.
+        let page_count = position / self.page_size as u64;
+
+        let maximum_id = PageID((page_count - 1) as usize);
+        Ok(AllocationState {
+            maximum_id,
+            free_list,
+        })
     }
 
     fn usable_page_size(&self) -> usize {
@@ -293,7 +381,7 @@ impl TablePageStoreManager for FileManager {
     fn builder(&mut self, table_name: &str) -> Result<Self::Builder, Error> {
         Ok(FileBuilder {
             page_size: self.page_size,
-            file_path: self.directory.join(&table_name).with_extension("dbdb"),
+            file_path: self.directory.join(table_name).with_extension("dbdb"),
         })
     }
 }

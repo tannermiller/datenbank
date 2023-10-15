@@ -2,7 +2,9 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
-use super::{Error, PageID, TablePageStore, TablePageStoreBuilder, TablePageStoreManager};
+use super::{
+    AllocationState, Error, PageID, TablePageStore, TablePageStoreBuilder, TablePageStoreManager,
+};
 
 #[derive(Debug)]
 pub struct Memory {
@@ -30,6 +32,13 @@ impl Inner {
                 Ok(self.last_page)
             }
         }
+    }
+
+    fn allocation_state(&mut self) -> Result<AllocationState, Error> {
+        Ok(AllocationState {
+            maximum_id: self.last_page,
+            free_list: self.free_list.iter().cloned().collect(),
+        })
     }
 
     fn usable_page_size(&self) -> usize {
@@ -89,6 +98,10 @@ impl Memory {
 impl TablePageStore for Memory {
     fn allocate(&mut self) -> Result<PageID, Error> {
         self.inner.borrow_mut().allocate()
+    }
+
+    fn allocation_state(&mut self) -> Result<AllocationState, Error> {
+        self.inner.borrow_mut().allocation_state()
     }
 
     fn usable_page_size(&self) -> usize {

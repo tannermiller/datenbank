@@ -4,6 +4,9 @@ use std::mem;
 
 use crate::pagestore::{Error as PageError, PageID, TablePageStore};
 
+// TODO: move the management of the free list into here, it will go into the WAL when I implement
+// that.
+
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum Error {
     #[error("io error attempting operation")]
