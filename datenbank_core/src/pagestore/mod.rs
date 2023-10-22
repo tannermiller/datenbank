@@ -12,9 +12,11 @@ pub enum Error {
     PayloadTooLong(usize, usize),
     #[error("provided page id has not been allocated yet: {0}")]
     UnallocatedPage(PageID),
+    #[error("can't remove page from free list: {0}")]
+    InvalidFreePage(PageID),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PageID(usize);
 
 impl PageID {
@@ -55,11 +57,24 @@ pub struct AllocationState {
 // implementation of this should automatically allocate the 0-indexed page at initial creation
 // time. That 0th page will be used for table header information and not for table content.
 pub trait TablePageStore: std::fmt::Debug {
-    // Allocate and prepare a new page in persistence, returning the page id.
-    fn allocate(&mut self) -> Result<PageID, Error>;
-
     // Return the current inner state of the page allocations.
     fn allocation_state(&mut self) -> Result<AllocationState, Error>;
+
+    // Allocate a new page from the end of the pagestore.
+    fn allocate_new(&mut self) -> Result<PageID, Error>;
+
+    // Remove the page id from the persisted free list. This is used to indicate that the page is
+    // being used without allocating a new page.
+    fn remove_from_free_list(&mut self, page_id: PageID) -> Result<(), Error>;
+
+    // Add this page id to the free list. This indicates that the page id is no longer storing
+    // useful data and should be added to the persisted free list. In addition, the persisted page
+    // will be zeroed out.
+    fn add_to_free_list(&mut self, page_id: PageID) -> Result<(), Error>;
+
+    // Allocate and prepare a new page in persistence, returning the page id.
+    // TODO: Remove this once the free list management is external.
+    fn allocate(&mut self) -> Result<PageID, Error>;
 
     // Return the maximum usable size for each page. This may be less than the page size provided
     // to construct this store as each implementation may reserve some bytes to act as an
@@ -75,6 +90,7 @@ pub trait TablePageStore: std::fmt::Debug {
     fn put(&mut self, page_id: PageID, payload: Vec<u8>) -> Result<(), Error>;
 
     // Delete the contents of the page and free it for reuse/deallocation.
+    // TODO: Remove this once the free list management is external.
     fn delete(&mut self, page_id: PageID) -> Result<(), Error>;
 }
 

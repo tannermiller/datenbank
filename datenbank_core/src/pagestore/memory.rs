@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::{
@@ -18,12 +18,12 @@ struct Inner {
     page_size: usize,
     last_page: PageID,
     store: HashMap<PageID, Vec<u8>>,
-    free_list: VecDeque<PageID>,
+    free_list: Vec<PageID>,
 }
 
 impl Inner {
     fn allocate(&mut self) -> Result<PageID, Error> {
-        match self.free_list.pop_front() {
+        match self.free_list.pop() {
             Some(free_id) => Ok(free_id),
             None => {
                 // we've got to "allocate" the 0th page for table stuff, so the first id we return
@@ -39,6 +39,31 @@ impl Inner {
             maximum_id: self.last_page,
             free_list: self.free_list.iter().cloned().collect(),
         })
+    }
+
+    fn allocate_new(&mut self) -> Result<PageID, Error> {
+        self.last_page.0 += 1;
+        Ok(self.last_page)
+    }
+
+    fn remove_from_free_list(&mut self, page_id: PageID) -> Result<(), Error> {
+        let mut idx = None;
+        for (i, pid) in self.free_list.iter().enumerate() {
+            if &page_id == pid {
+                idx = Some(i);
+                break;
+            }
+        }
+        if let Some(idx) = idx {
+            self.free_list.remove(idx);
+        }
+        Ok(())
+    }
+
+    fn add_to_free_list(&mut self, page_id: PageID) -> Result<(), Error> {
+        self.free_list.push(page_id);
+        self.store.remove(&page_id);
+        Ok(())
     }
 
     fn usable_page_size(&self) -> usize {
@@ -76,7 +101,7 @@ impl Inner {
         }
 
         self.store.remove(&page_id);
-        self.free_list.push_back(page_id);
+        self.free_list.push(page_id);
 
         Ok(())
     }
@@ -89,7 +114,7 @@ impl Memory {
                 page_size,
                 last_page: PageID(0),
                 store: HashMap::new(),
-                free_list: VecDeque::new(),
+                free_list: Vec::new(),
             })),
         }
     }
@@ -102,6 +127,18 @@ impl TablePageStore for Memory {
 
     fn allocation_state(&mut self) -> Result<AllocationState, Error> {
         self.inner.borrow_mut().allocation_state()
+    }
+
+    fn allocate_new(&mut self) -> Result<PageID, Error> {
+        self.inner.borrow_mut().allocate_new()
+    }
+
+    fn remove_from_free_list(&mut self, page_id: PageID) -> Result<(), Error> {
+        self.inner.borrow_mut().remove_from_free_list(page_id)
+    }
+
+    fn add_to_free_list(&mut self, page_id: PageID) -> Result<(), Error> {
+        self.inner.borrow_mut().add_to_free_list(page_id)
     }
 
     fn usable_page_size(&self) -> usize {
