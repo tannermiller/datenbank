@@ -15,7 +15,7 @@ impl<S: TablePageStore> BTree<S> {
         let mut root_id = match self.root {
             None => {
                 changed_root = true;
-                let root_id = self.store.allocate()?;
+                let root_id = self.node_cache.allocate()?;
                 self.root = Some(root_id);
 
                 let root_node = Node::new_leaf(root_id, self.order);

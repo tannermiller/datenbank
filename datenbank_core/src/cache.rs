@@ -79,7 +79,15 @@ impl<S: TablePageStore, P: Page> Cache<S, P> {
     }
 
     pub(crate) fn allocate(&mut self) -> Result<PageID, Error> {
-        let page_id = self.store.allocate()?;
+        let mut alloc_state = self.store.allocation_state()?;
+
+        let page_id = if let Some(page_id) = alloc_state.free_list.pop() {
+            self.store.remove_from_free_list(page_id)?;
+            page_id
+        } else {
+            self.store.allocate_new()?
+        };
+
         self.allocated.insert(page_id);
         Ok(page_id)
     }
@@ -114,7 +122,7 @@ impl<S: TablePageStore, P: Page> Cache<S, P> {
 
         // delete the allocated but unused pages, so that they can be reused
         for unused_page in mem::take(&mut self.allocated) {
-            self.store.delete(unused_page)?;
+            self.store.add_to_free_list(unused_page)?;
         }
 
         Ok(())
