@@ -88,81 +88,6 @@ impl File {
 }
 
 impl TablePageStore for File {
-    fn allocate(&mut self) -> Result<PageID, Error> {
-        // Seek to end, get final position, divide by page_size to get current page_count,
-        // write out a new page of zeroes
-
-        let mut current_free_list_page = PageID(1);
-        let mut previous_free_list_page = None;
-        loop {
-            let mut free_list_page = self.get(current_free_list_page)?;
-
-            if free_list_page.len() < 8 {
-                // somethings messed up with the free list page, just break and allocate a page id
-                break;
-            }
-
-            let next_page_pointer = read_u32_from_slice(&free_list_page[..4])?;
-
-            // if the next page pointer isn't zero, then there's another page out there, iterate to
-            // that since we pop off the back of the free list
-            if next_page_pointer != 0 {
-                previous_free_list_page = Some(current_free_list_page);
-                current_free_list_page = next_page_pointer.into();
-                continue;
-            }
-
-            // now we know we're on the last page of the free list
-            let list_len = read_u32_from_slice(&free_list_page[4..8])?;
-
-            // If the list len is zero, then we're in the weird situation where we can't unfree
-            // this page, because then we'd need another free list page to hold this unfreed page.
-            // To sidestep that whole problem we'll just clear this page out and return it as the
-            // newly allocated page and reset the previous page's pointer to blank, indicating that
-            // it is now the last page.
-            match (list_len, previous_free_list_page) {
-                (0, None) => break, // first page, free list is empty, just allocate a new page
-                (0, Some(prev)) => {
-                    // return this page and make the prev page the last one
-                    let mut prev_free_page = self.get(prev)?;
-
-                    // clear the pointer bytes to indicate the prev page is now the last
-                    prev_free_page.splice(0..4, [0, 0, 0, 0]);
-                    self.put(prev, prev_free_page)?;
-
-                    // return the current free page as the allocated page
-                    return Ok(current_free_list_page);
-                }
-                _ => (), // otherwise continue down
-            }
-
-            // pull out the last list from the free page
-            let start_idx = (8 + (list_len - 1) * 4) as usize;
-            let page_id = read_u32_from_slice(&free_list_page[start_idx..start_idx + 4])?;
-            free_list_page.truncate(free_list_page.len() - 4);
-            free_list_page.splice(4..8, (list_len - 1).to_be_bytes());
-            self.put(current_free_list_page, free_list_page)?;
-
-            return Ok(page_id.into());
-        }
-
-        // if we made it past the loop, then we need to actually allocate a new page
-        let position = self
-            .file
-            .seek(SeekFrom::End(0))
-            .map_err(|e| Error::Io(e.to_string()))?;
-
-        // this will give us the total written pages up to now, since the pages are 0-indexed this
-        // will actually also be the returned index for the next page
-        let page_count = position / self.page_size as u64;
-
-        self.file
-            .write_all(&vec![0; self.page_size as usize])
-            .map_err(|e| Error::Io(e.to_string()))?;
-
-        Ok(PageID(page_count as usize))
-    }
-
     fn allocation_state(&mut self) -> Result<AllocationState, Error> {
         let free_list = self.free_list()?;
 
@@ -315,58 +240,6 @@ impl TablePageStore for File {
             .write_all(&payload)
             .map_err(|e| Error::Io(e.to_string()))
     }
-
-    fn delete(&mut self, page_id: PageID) -> Result<(), Error> {
-        // On delete, we need to zero our the page and then add it to the free list. In order to
-        // add to the free list, we start at the first free list page (index 1) and follow the
-        // linked list of free list page nodes to the last one. We add this page id to the last
-        // one. If the page id won't fit on the last page then we utilize this page id as the new
-        // empty free list and the previous free list page has its pointer rewritten to point at
-        // this page.
-
-        let mut current_free_list_page = PageID(1);
-        loop {
-            let mut free_list_page = self.get(current_free_list_page)?;
-
-            if free_list_page.len() < 8 {
-                // something's wrong here, we're just going to reformat this free list page and add
-                // our new page here
-
-                // 4 for pointer, 4 for len, 4 for first page id
-                let mut free_list_page = Vec::with_capacity(12);
-                free_list_page.extend(0u32.to_be_bytes());
-                free_list_page.extend(1u32.to_be_bytes());
-                free_list_page.extend(page_id.to_be_bytes());
-
-                self.put(current_free_list_page, free_list_page)?;
-                return Ok(());
-            }
-
-            let next_page_pointer = read_u32_from_slice(&free_list_page[..4])?;
-            if next_page_pointer != 0 {
-                // head on to the next page
-                current_free_list_page = next_page_pointer.into();
-                continue;
-            }
-
-            let list_len = read_u32_from_slice(&free_list_page[4..8])?;
-            let max_page_count = (self.usable_page_size() - 8) / 4;
-            if list_len as usize == max_page_count {
-                // this page is full, we need to make the deleted page a new free list page
-                free_list_page.splice(..4, page_id.to_be_bytes());
-                self.put(current_free_list_page, free_list_page)?;
-                self.put(page_id, vec![0, 0, 0, 0, 0, 0, 0, 0])?;
-                return Ok(());
-            }
-
-            // ok, we're sticking it in this page as we've got space in it
-            free_list_page.extend(page_id.to_be_bytes());
-            free_list_page.splice(4..8, (list_len + 1).to_be_bytes());
-            self.put(current_free_list_page, free_list_page)?;
-
-            return Ok(());
-        }
-    }
 }
 
 fn read_u32_from_slice(slice: &[u8]) -> Result<u32, Error> {
@@ -468,7 +341,7 @@ mod test {
 
         let mut file_manager = FileManager::new(temp_dir, 16 * 1024);
         let mut store = file_manager.builder(table_name).unwrap().build().unwrap();
-        let next_page = store.allocate().unwrap();
+        let next_page = store.allocate_new().unwrap();
         assert_eq!(PageID(2), next_page);
 
         let page_data = store.get(next_page).unwrap();
@@ -496,7 +369,7 @@ mod test {
         let page_data = store.get(next_page).unwrap();
         assert_eq!(b"gonna put something here too".as_slice(), &page_data);
 
-        let another_page = store.allocate().unwrap();
+        let another_page = store.allocate_new().unwrap();
         assert_eq!(PageID(3), another_page);
         store
             .put(another_page, b"I'm hereeeeeeee".to_vec())
@@ -523,35 +396,12 @@ mod test {
         );
 
         // test delete and allocate gives us this page back
-        store.delete(next_page).unwrap();
-        assert_eq!(next_page, store.allocate().unwrap());
-
-        let _ = fs::remove_file(db_file_path);
-    }
-
-    #[test]
-    fn test_old_free_list() {
-        let table_name = "old_free_list_test";
-        let temp_dir = env::temp_dir();
-        let db_file_path = temp_dir.join(table_name).with_extension("dbdb");
-        // just cleaning up from a previous run, doesn't matter what happens
-        let _ = fs::remove_file(&db_file_path);
-
-        let mut file_manager = FileManager::new(temp_dir, 16 * 1024);
-        let mut store = file_manager.builder(table_name).unwrap().build().unwrap();
-        let count = 10000;
-
-        for i in 0..count {
-            assert_eq!(PageID(i + 2), store.allocate().unwrap());
-        }
-
-        for i in 0..count {
-            store.delete(PageID(i + 2)).unwrap();
-        }
-
-        for i in (0..count).rev() {
-            assert_eq!(PageID(i + 2), store.allocate().unwrap());
-        }
+        store.add_to_free_list(next_page).unwrap();
+        let alloc_state = store.allocation_state().unwrap();
+        assert!(alloc_state.free_list.contains(&next_page));
+        store.remove_from_free_list(next_page).unwrap();
+        let alloc_state = store.allocation_state().unwrap();
+        assert!(!alloc_state.free_list.contains(&next_page));
 
         let _ = fs::remove_file(db_file_path);
     }

@@ -72,10 +72,6 @@ pub trait TablePageStore: std::fmt::Debug {
     // will be zeroed out.
     fn add_to_free_list(&mut self, page_id: PageID) -> Result<(), Error>;
 
-    // Allocate and prepare a new page in persistence, returning the page id.
-    // TODO: Remove this once the free list management is external.
-    fn allocate(&mut self) -> Result<PageID, Error>;
-
     // Return the maximum usable size for each page. This may be less than the page size provided
     // to construct this store as each implementation may reserve some bytes to act as an
     // implementation specific header.
@@ -88,10 +84,6 @@ pub trait TablePageStore: std::fmt::Debug {
     // Write a page's payload to persistence. An Err(Error::PayloadTooLong) will be returned if the
     // payload.
     fn put(&mut self, page_id: PageID, payload: Vec<u8>) -> Result<(), Error>;
-
-    // Delete the contents of the page and free it for reuse/deallocation.
-    // TODO: Remove this once the free list management is external.
-    fn delete(&mut self, page_id: PageID) -> Result<(), Error>;
 }
 
 pub trait TablePageStoreBuilder: std::fmt::Debug {

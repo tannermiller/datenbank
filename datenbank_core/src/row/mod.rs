@@ -410,7 +410,7 @@ mod test {
 
         // ensure that the 8 pages were allocated by seeing the next allocated one is 9
         let mut store = store_builder.build().unwrap();
-        assert_eq!(PageID::from(9u32), store.allocate().unwrap());
+        assert_eq!(PageID::from(9u32), store.allocate_new().unwrap());
         assert_eq!(
             &vec![1u8, 0, 0, 0, 2, 48, 49, 50],
             data_cache.get(1u32.into()).unwrap()

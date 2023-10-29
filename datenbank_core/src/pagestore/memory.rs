@@ -22,18 +22,6 @@ struct Inner {
 }
 
 impl Inner {
-    fn allocate(&mut self) -> Result<PageID, Error> {
-        match self.free_list.pop() {
-            Some(free_id) => Ok(free_id),
-            None => {
-                // we've got to "allocate" the 0th page for table stuff, so the first id we return
-                // from here is at least 1
-                self.last_page.0 += 1;
-                Ok(self.last_page)
-            }
-        }
-    }
-
     fn allocation_state(&mut self) -> Result<AllocationState, Error> {
         Ok(AllocationState {
             maximum_id: self.last_page,
@@ -94,17 +82,6 @@ impl Inner {
 
         Ok(())
     }
-
-    fn delete(&mut self, page_id: PageID) -> Result<(), Error> {
-        if page_id > self.last_page {
-            return Err(Error::UnallocatedPage(page_id));
-        }
-
-        self.store.remove(&page_id);
-        self.free_list.push(page_id);
-
-        Ok(())
-    }
 }
 
 impl Memory {
@@ -121,10 +98,6 @@ impl Memory {
 }
 
 impl TablePageStore for Memory {
-    fn allocate(&mut self) -> Result<PageID, Error> {
-        self.inner.borrow_mut().allocate()
-    }
-
     fn allocation_state(&mut self) -> Result<AllocationState, Error> {
         self.inner.borrow_mut().allocation_state()
     }
@@ -151,10 +124,6 @@ impl TablePageStore for Memory {
 
     fn put(&mut self, page_id: PageID, payload: Vec<u8>) -> Result<(), Error> {
         self.inner.borrow_mut().put(page_id, payload)
-    }
-
-    fn delete(&mut self, page_id: PageID) -> Result<(), Error> {
-        self.inner.borrow_mut().delete(page_id)
     }
 }
 
@@ -249,22 +218,26 @@ mod test {
 
         // create a new page and verify
         assert_eq!(Err(Error::UnallocatedPage(PageID(1))), mem.get(PageID(1)));
-        assert_eq!(Ok(PageID(1)), mem.allocate());
+        assert_eq!(Ok(PageID(1)), mem.allocate_new());
         check(&mut mem, PageID(1));
 
         // delete the most recent page and ensure we get it back on re-allocation
-        assert!(mem.delete(PageID(1)).is_ok());
-        assert_eq!(Ok(PageID(1)), mem.allocate());
+        assert!(mem.add_to_free_list(PageID(1)).is_ok());
+        let alloc_state = mem.allocation_state().unwrap();
+        assert!(alloc_state.free_list.contains(&PageID(1)));
+        assert!(mem.remove_from_free_list(PageID(1)).is_ok());
         check(&mut mem, PageID(1));
 
         // ok, now allocate a brand new page
-        assert_eq!(Ok(PageID(2)), mem.allocate());
+        assert_eq!(Ok(PageID(2)), mem.allocate_new());
         check(&mut mem, PageID(2));
 
         // delete the first page again and verify we get it again from the free list and not
         // allocate an entirely new page
-        assert!(mem.delete(PageID(1)).is_ok());
-        assert_eq!(Ok(PageID(1)), mem.allocate());
+        assert!(mem.add_to_free_list(PageID(1)).is_ok());
+        let alloc_state = mem.allocation_state().unwrap();
+        assert!(alloc_state.free_list.contains(&PageID(1)));
+        assert!(mem.remove_from_free_list(PageID(1)).is_ok());
         check(&mut mem, PageID(1));
     }
 }
